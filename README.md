@@ -6,7 +6,7 @@ A web application for analyzing concentration-response data using the four-param
 
 - **Excel File Upload**: Supports .xls and .xlsx files
 - **Data Editing**: Inline editing capabilities for uploaded data
-- **Automatic Curve Fitting**: Uses the four-parameter logistic equation with fixed Top=100 and Bottom=0
+- **Automatic Curve Fitting**: Uses the four-parameter logistic equation with optimized parameters
 - **Interactive Charts**: Concentration-response curves with original data points and fitted curves
 - **Statistical Summaries**: EC50, Hill Slope, and R² values for each sample
 - **Real-time Processing**: Immediate results display
@@ -22,8 +22,8 @@ Y = Bottom + (Top - Bottom) / (1 + (2^(1/HillSlope) - 1) * (EC50/X)^HillSlope)
 Where:
 - **Y**: Response value (%)
 - **X**: Concentration (nM)
-- **Top**: Maximum response (fixed at 100%)
-- **Bottom**: Minimum response (fixed at 0%)
+- **Top**: Maximum response (optimized parameter)
+- **Bottom**: Minimum response (optimized parameter)
 - **EC50**: Concentration producing 50% of maximum response
 - **HillSlope**: Steepness of the curve
 

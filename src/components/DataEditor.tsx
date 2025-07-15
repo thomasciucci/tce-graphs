@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DataPoint } from '../types';
 
 interface DataEditorProps {
@@ -11,15 +11,40 @@ interface DataEditorProps {
 export default function DataEditor({ data, onDataUpdate }: DataEditorProps) {
   const [editingData, setEditingData] = useState<DataPoint[]>(data);
   const [isEditing, setIsEditing] = useState(false);
+  
+  // Group state (per column) - update when data changes
+  const [replicateGroups, setReplicateGroups] = useState<string[]>(() => {
+    if (data[0]?.replicateGroups && data[0].replicateGroups.length === data[0].sampleNames.length) {
+      return [...data[0].replicateGroups];
+    }
+    return data[0]?.sampleNames.map((name, i) => `Group ${i + 1}`) || [];
+  });
+  
+  // Update replicate groups when data changes
+  useEffect(() => {
+    if (data[0]?.replicateGroups && data[0].replicateGroups.length === data[0].sampleNames.length) {
+      setReplicateGroups([...data[0].replicateGroups]);
+    } else {
+      setReplicateGroups(data[0]?.sampleNames.map((name, i) => `Group ${i + 1}`) || []);
+    }
+  }, [data]);
 
   const handleEdit = () => {
     setIsEditing(true);
     setEditingData([...data]);
+    setReplicateGroups(
+      data[0]?.replicateGroups && data[0].replicateGroups.length === data[0].sampleNames.length
+        ? [...data[0].replicateGroups]
+        : data[0]?.sampleNames.map((name, i) => `Group ${i + 1}`) || []
+    );
   };
 
   const handleSave = () => {
-    onDataUpdate(editingData);
+    // Save replicateGroups in all rows (for consistency)
+    const updated = editingData.map(row => ({ ...row, replicateGroups: [...replicateGroups] }));
+    onDataUpdate(updated);
     setIsEditing(false);
+    setEditingData(updated);
   };
 
   const handleCancel = () => {
@@ -92,8 +117,25 @@ export default function DataEditor({ data, onDataUpdate }: DataEditorProps) {
                   Concentration
                 </th>
                 {currentData[0].sampleNames.map((name, index) => (
-                  <th key={index} className="border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-700">
-                    {name}
+                  <th key={`header_${name || 'col'}_${index}`} className="border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-700">
+                    <div>{name}</div>
+                    {isEditing && (
+                      <select
+                        className="mt-1 block w-full border border-gray-300 rounded text-xs"
+                        value={replicateGroups[index] || ''}
+                        onChange={e => {
+                          const newGroups = [...replicateGroups];
+                          newGroups[index] = e.target.value;
+                          setReplicateGroups(newGroups);
+                        }}
+                      >
+                        {/* Show all unique group names as options, plus allow new */}
+                        {Array.from(new Set(replicateGroups)).map((group, i) => (
+                          <option key={`option_${group || 'group'}_${i}`} value={group}>{group}</option>
+                        ))}
+                        <option value={''}>New Group...</option>
+                      </select>
+                    )}
                   </th>
                 ))}
                 {isEditing && (
@@ -105,7 +147,7 @@ export default function DataEditor({ data, onDataUpdate }: DataEditorProps) {
             </thead>
             <tbody>
               {currentData.map((row, rowIndex) => (
-                <tr key={rowIndex} className="hover:bg-gray-50">
+                <tr key={`row_${rowIndex}`} className="hover:bg-gray-50">
                   <td className="border border-gray-300 px-3 py-2">
                     {isEditing ? (
                       <input
@@ -120,7 +162,7 @@ export default function DataEditor({ data, onDataUpdate }: DataEditorProps) {
                     )}
                   </td>
                   {row.responses.map((response, colIndex) => (
-                    <td key={colIndex} className="border border-gray-300 px-3 py-2">
+                    <td key={`cell_${rowIndex}_${colIndex}`} className="border border-gray-300 px-3 py-2">
                       {isEditing ? (
                         <input
                           type="number"

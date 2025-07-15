@@ -2,6 +2,17 @@ export interface DataPoint {
   concentration: number;
   responses: number[];
   sampleNames: string[];
+  replicateGroups?: string[];
+}
+
+export interface Dataset {
+  id: string;
+  name: string;
+  data: DataPoint[];
+  assayType: string;
+  sheetName?: string;
+  fittedCurves?: FittedCurve[];
+  curveColors?: string[];
 }
 
 export interface FittedCurve {
@@ -13,6 +24,7 @@ export interface FittedCurve {
   rSquared: number;
   fittedPoints: { x: number; y: number }[];
   originalPoints: { x: number; y: number }[];
+  meanPoints?: { x: number; y: number; sem: number }[];
 }
 
 export interface CurveParameters {
