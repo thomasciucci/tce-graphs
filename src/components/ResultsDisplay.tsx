@@ -1,26 +1,66 @@
 'use client';
 
-import { ComposedChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Scatter, ErrorBar } from 'recharts';
+import React, { forwardRef } from 'react';
+import { ComposedChart, Line, Scatter, XAxis, YAxis, ResponsiveContainer, Legend, ErrorBar } from 'recharts';
 import { DataPoint, FittedCurve } from '../types';
 
 interface ResultsDisplayProps {
   data: DataPoint[];
   fittedCurves: FittedCurve[];
   curveColors: string[];
+  datasetName?: string;
+  assayType?: string;
+  onColorChange?: (index: number, color: string) => void;
+  datasets?: Array<{ id?: string; name: string; assayType?: string }>;
+  activeDatasetIndex?: number;
+  onDatasetChange?: (index: number) => void;
 }
 
-export default function ResultsDisplay({ data, fittedCurves, curveColors }: ResultsDisplayProps) {
-  console.log('ResultsDisplay received:', { data, fittedCurves, curveColors });
+const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({ 
+  data, 
+  fittedCurves, 
+  curveColors, 
+  datasetName, 
+  assayType, 
+  onColorChange, 
+  datasets, 
+  activeDatasetIndex, 
+  onDatasetChange 
+}, ref) => {
+  console.log('ResultsDisplay received:', { data, fittedCurves, curveColors, datasetName, assayType });
+  
+  // Determine Y-axis label based on assay type
+  const getYAxisLabel = () => {
+    if (assayType) {
+      const normalizedType = assayType.toLowerCase();
+      if (normalizedType.includes('cytotoxicity') || normalizedType.includes('killing')) {
+        return '% Cytotoxicity';
+      } else if (normalizedType.includes('cd4') && normalizedType.includes('activation')) {
+        return 'CD4 Activation (%)';
+      } else if (normalizedType.includes('cd8') && normalizedType.includes('activation')) {
+        return 'CD8 Activation (%)';
+      } else if (normalizedType.includes('activation')) {
+        return 'Activation (%)';
+      } else if (normalizedType.includes('degranulation')) {
+        return 'Degranulation (%)';
+      } else if (normalizedType.includes('proliferation')) {
+        return 'Proliferation (%)';
+      } else if (normalizedType.includes('target')) {
+        return 'Target Cells (%)';
+      }
+    }
+    return 'Response (%)';
+  };
+  
+  const yAxisLabel = getYAxisLabel();
   
   // Check if we have custom groups (multiple columns assigned to same group)
   const hasCustomGroups = data[0]?.replicateGroups && 
     data[0].replicateGroups.length === data[0].sampleNames.length &&
     new Set(data[0].replicateGroups).size < data[0].replicateGroups.length;
   
-  // Filter curves for legend display - only show group curves if custom groups exist
-  const legendCurves = hasCustomGroups ? 
-    fittedCurves.filter(curve => !data[0].sampleNames.includes(curve.sampleName)) : 
-    fittedCurves;
+  // Only show individual sample/column curves in the legend and chart
+  const individualCurves = fittedCurves.filter(curve => data[0]?.sampleNames.includes(curve.sampleName));
   
   // Early return if no curves
   if (!fittedCurves || fittedCurves.length === 0) {
@@ -76,12 +116,12 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
   const allConcentrationsSet = new Set<number>();
   
   // Add all fitted points (these should be the main driver for smooth curves)
-  legendCurves.forEach(curve => {
+  individualCurves.forEach(curve => {
     curve.fittedPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
   });
   
   // Add original points (for scatter dots)
-  legendCurves.forEach(curve => {
+  individualCurves.forEach(curve => {
     curve.originalPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
   });
   
@@ -92,7 +132,7 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
     const row: Record<string, number> = { concentration };
     
     // Add fitted curve data (for smooth lines)
-    legendCurves.forEach((curve) => {
+    individualCurves.forEach((curve) => {
       const fittedPoint = curve.fittedPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
       if (fittedPoint) {
         row[`${curve.sampleName}_fitted`] = fittedPoint.y;
@@ -100,7 +140,7 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
     });
     
     // Add original data points (for scatter dots)
-    legendCurves.forEach((curve) => {
+    individualCurves.forEach((curve) => {
       const originalPoint = curve.originalPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
       if (originalPoint) {
         row[`${curve.sampleName}_original`] = originalPoint.y;
@@ -130,11 +170,32 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
   const minConcentration = validChartData.length > 0 ? Math.min(...validChartData.map(row => row.concentration)) : 0.1;
   const maxConcentration = validChartData.length > 0 ? Math.max(...validChartData.map(row => row.concentration)) : 1000;
   
+  // Generate appropriate ticks based on concentration range
+  const generateTicks = () => {
+    const ticks = [];
+    const minLog = Math.floor(Math.log10(minConcentration));
+    const maxLog = Math.ceil(Math.log10(maxConcentration));
+    
+    console.log('Generating ticks:', { minLog, maxLog, minConcentration, maxConcentration });
+    
+    for (let i = minLog; i <= maxLog; i++) {
+      const tick = Math.pow(10, i);
+      if (tick >= minConcentration * 0.1 && tick <= maxConcentration * 10) {
+        ticks.push(tick);
+      }
+    }
+    
+    console.log('Generated ticks:', ticks);
+    return ticks.length > 0 ? ticks : [0.001, 0.01, 0.1, 1, 10, 100, 1000];
+  };
+  
+  const xAxisTicks = generateTicks();
+  
   console.log('Valid chart data for rendering:', validChartData);
   console.log('Concentration range:', { min: minConcentration, max: maxConcentration });
 
   // After building validChartData, ensure all *_sem values are finite numbers for ErrorBar
-  legendCurves.forEach(curve => {
+  individualCurves.forEach(curve => {
     const semKey = `${curve.sampleName}_sem`;
     validChartData.forEach(row => {
       if (!Number.isFinite(row[semKey])) {
@@ -143,12 +204,25 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
     });
   });
 
+  console.log('data[0].sampleNames:', data[0]?.sampleNames);
+  console.log('fittedCurves sampleNames:', fittedCurves.map(c => c.sampleName));
+  console.log('individualCurves:', individualCurves);
+  console.log('validChartData:', validChartData);
+
   return (
-    <div className="bg-white p-6 rounded-lg shadow">
-      <h2 className="text-xl font-semibold mb-4">Results</h2>
+    <div ref={ref} className="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+      <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
+        <svg className="w-6 h-6 mr-2 text-[#8A0051]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+        Results
+      </h2>
       {hasZeroOrNegative && (
-        <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-          Warning: Concentration values ≤ 0 are not shown on the log-scale chart.
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center text-sm text-amber-800">
+          <svg className="w-5 h-5 mr-2 text-amber-600" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+          <span><strong>Warning:</strong> Concentration values ≤ 0 are not shown on the log-scale chart.</span>
         </div>
       )}
       {validChartData.length === 0 ? (
@@ -159,81 +233,251 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
         <div>
           <h3 className="text-lg font-medium text-gray-900 mb-3">Summary Statistics</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {fittedCurves.map((curve, index) => (
-              <div key={`${curve.sampleName || 'curve'}_${index}_summary`} className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-2">{curve.sampleName}</h4>
-                <div className="space-y-1 text-sm text-gray-600">
-                  <div>EC50: {curve.ec50.toFixed(4)} nM</div>
-                  <div>Hill Slope: {curve.hillSlope.toFixed(4)}</div>
-                  <div>R²: {curve.rSquared.toFixed(4)}</div>
-                  <div>Top: {curve.top}</div>
-                  <div>Bottom: {curve.bottom}</div>
+            {individualCurves.map((curve, index) => (
+              <div key={`${curve.sampleName || 'curve'}_${index}_summary`} className="bg-gradient-to-br from-gray-50 to-gray-100 p-4 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center mb-3">
+                  <div 
+                    className="w-4 h-4 rounded-full mr-3 border-2 border-white shadow-sm"
+                    style={{ backgroundColor: curveColors[index] || '#8884d8' }}
+                  />
+                  <h4 className="font-semibold text-gray-900">{curve.sampleName}</h4>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">EC50:</span>
+                    <span className="font-medium text-gray-900">{curve.ec50.toFixed(4)} nM</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Hill Slope:</span>
+                    <span className="font-medium text-gray-900">{curve.hillSlope.toFixed(4)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">R²:</span>
+                    <span className={`font-medium ${curve.rSquared >= 0.9 ? 'text-green-600' : curve.rSquared >= 0.8 ? 'text-yellow-600' : 'text-red-600'}`}>{curve.rSquared.toFixed(4)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Top:</span>
+                    <span className="font-medium text-gray-900">{curve.top.toFixed(2)}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Bottom:</span>
+                    <span className="font-medium text-gray-900">{curve.bottom.toFixed(2)}%</span>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
+        {/* Curve Colors Section */}
+        {onColorChange && (
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 mb-3">Curve Colors</h3>
+            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+              <div className="flex flex-wrap gap-4">
+                {individualCurves.map((curve, idx) => (
+                  <div key={`${curve.sampleName || 'curve'}_${idx}`} className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{curve.sampleName}</span>
+                    <input
+                      type="color"
+                      value={curveColors[idx] || '#8884d8'}
+                      onChange={e => onColorChange(idx, e.target.value)}
+                      className="w-8 h-8 border border-gray-300 rounded cursor-pointer"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dataset Selection Section (only show when multiple datasets and curves are fitted) */}
+        {datasets && datasets.length > 1 && fittedCurves.length > 0 && onDatasetChange && (
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 mb-3">Select Dataset</h3>
+            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+              <div className="flex flex-wrap gap-2">
+                {datasets.map((dataset, index) => {
+                  // Use the best keyword for the tab label
+                  let label = dataset.name;
+                  const genericPattern = /^data table/i;
+                  if (genericPattern.test(label)) {
+                    // Try to find a better keyword in sample names
+                    const sampleText = (dataset.name || '').toLowerCase();
+                    if (sampleText.includes('cytotoxicity') || sampleText.includes('killing')) {
+                      label = 'Cytotoxicity';
+                    } else if (sampleText.includes('cd4')) {
+                      label = 'CD4 Activation';
+                    } else if (sampleText.includes('cd8')) {
+                      label = 'CD8 Activation';
+                    }
+                  }
+                  return (
+                    <button
+                      key={`${dataset.id || ''}_${index}`}
+                      onClick={() => onDatasetChange(index)}
+                      className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                        index === activeDatasetIndex
+                          ? 'bg-[#8A0051] text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Concentration-Response Curves */}
         <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-3">Concentration-Response Curves</h3>
-          <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={validChartData}>
+          <h3 className="text-lg font-medium text-gray-900 mb-3">
+            {datasetName ? `${datasetName} - Concentration-Response Curves` : 'Concentration-Response Curves'}
+          </h3>
+          <div className="h-[600px] lg:h-[700px] w-full bg-white border border-gray-200 rounded-lg p-4 relative" data-testid="chart-container">
+            {/* Custom Y-axis label positioned outside (hidden during PDF capture) */}
+            <div 
+              className="absolute print:hidden"
+              data-html2canvas-ignore="true"
+              style={{
+                left: '70px',
+                top: '45%',
+                fontSize: '20px',
+                fontFamily: 'Arial, sans-serif',
+                fontWeight: 'bold',
+                color: '#000000',
+                whiteSpace: 'nowrap',
+                zIndex: 10,
+                transformOrigin: 'center center',
+                transform: 'translateY(-50%) rotate(-90deg)'
+              }}
+            >
+              {yAxisLabel}
+            </div>
+            <ResponsiveContainer width="100%" height="100%" minWidth={800} data-testid="concentration-response-chart" className="recharts-responsive-container">
+              <ComposedChart data={validChartData}
+                margin={{ top: 60, right: 140, left: 160, bottom: 120 }}
+                data-testid="main-chart-svg"
+              >
                 <XAxis 
                   dataKey="concentration"
                   type="number"
                   scale="log"
-                  domain={[0.001, 1000]}
-                  label={{ value: 'Concentration (nM)', position: 'insideBottom', offset: -10 }}
-                  tickFormatter={value => value.toString()}
-                  ticks={[0.001, 0.01, 0.1, 1, 10, 100, 1000]}
-                  tick={{ fontSize: 14 }}
+                  domain={[minConcentration * 0.1, maxConcentration * 10]}
+                  label={{ 
+                    value: 'Concentration [nM]', 
+                    position: 'bottom', 
+                    offset: 15, 
+                    fontSize: 20, 
+                    fontFamily: 'Arial, sans-serif',
+                    fontWeight: 'bold',
+                    fill: '#000000'
+                  }}
+                  tickFormatter={value => {
+                    if (value <= 0) return '';
+                    const exponent = Math.floor(Math.log10(value));
+                    if (exponent < 0) {
+                      const absExponent = Math.abs(exponent);
+                      if (absExponent === 1) return '10⁻¹';
+                      if (absExponent === 2) return '10⁻²';
+                      if (absExponent === 3) return '10⁻³';
+                      if (absExponent === 4) return '10⁻⁴';
+                      if (absExponent === 5) return '10⁻⁵';
+                      if (absExponent === 6) return '10⁻⁶';
+                      if (absExponent === 7) return '10⁻⁷';
+                      if (absExponent === 8) return '10⁻⁸';
+                      if (absExponent === 9) return '10⁻⁹';
+                      return `10⁻${absExponent}`;
+                    } else if (exponent === 0) {
+                      return '10⁰';
+                    } else if (exponent === 1) {
+                      return '10¹';
+                    } else if (exponent === 2) {
+                      return '10²';
+                    } else if (exponent === 3) {
+                      return '10³';
+                    } else if (exponent === 4) {
+                      return '10⁴';
+                    } else if (exponent === 5) {
+                      return '10⁵';
+                    } else if (exponent === 6) {
+                      return '10⁶';
+                    } else if (exponent === 7) {
+                      return '10⁷';
+                    } else if (exponent === 8) {
+                      return '10⁸';
+                    } else if (exponent === 9) {
+                      return '10⁹';
+                    } else {
+                      return `10${exponent}`;
+                    }
+                  }}
+                  ticks={xAxisTicks}
+                  tick={{ fontSize: 18, fontFamily: 'Arial, sans-serif', fontWeight: 'bold' }}
+                  allowDataOverflow={false}
+                  axisLine={{ stroke: '#000000', strokeWidth: 2 }}
                 />
-                <YAxis 
-                  label={{ value: 'Response (%)', angle: -90, position: 'insideLeft' }}
+                <YAxis
+                  label={{ 
+                    value: yAxisLabel, 
+                    angle: -90, 
+                    position: 'insideLeft', 
+                    fontSize: 20, 
+                    fontFamily: 'Arial, sans-serif', 
+                    fontWeight: 'bold',
+                    offset: -25,
+                    textAnchor: 'middle',
+                    fill: '#000000'
+                  }}
                   domain={[0, 100]}
                   ticks={[0, 20, 40, 60, 80, 100]}
-                  tick={{ fontSize: 14 }}
+                  tick={{ fontSize: 18, fontFamily: 'Arial, sans-serif', fontWeight: 'bold' }}
+                  axisLine={{ stroke: '#000000', strokeWidth: 2 }}
                 />
-                <Tooltip 
-                  formatter={(value: number, name: string) => [
-                    `${value.toFixed(2)}%`, 
-                    name.replace('_original', '').replace('_fitted', '').replace('_mean', '').trim()
-                  ]}
-                  labelFormatter={(label) => `Concentration: ${label} nM`}
-                />
+                {/* Enhanced Legend for PDF */}
                 <Legend 
                   layout="vertical"
                   verticalAlign="middle"
                   align="right"
                   iconType="square"
-                  wrapperStyle={{ right: 20, top: 40, fontSize: 16 }}
+                  wrapperStyle={{ 
+                    right: -20, 
+                    fontSize: 16, 
+                    fontFamily: 'Arial, sans-serif',
+                    fontWeight: 'bold',
+                    maxWidth: 150,
+                    padding: '10px',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #cccccc',
+                    borderRadius: '5px'
+                  }}
                 />
-                
-                {/* Fitted curves */}
-                {legendCurves.map((curve, index) => (
+                {/* Fitted curves with PDF-safe colors */}
+                {individualCurves.map((curve, index) => (
                   <Line
                     key={`${curve.sampleName || 'curve'}_${index}_fitted`}
                     type="monotone"
                     dataKey={`${curve.sampleName}_fitted`}
-                    stroke={curveColors[index] || '#8884d8'}
-                    strokeWidth={2}
+                    stroke={curveColors[index] || '#000000'}
+                    strokeWidth={3}
                     dot={false}
                     connectNulls={true}
                     legendType="line"
                     name={curve.sampleName}
                   />
                 ))}
-                {/* Original data points */}
-                {legendCurves.map((curve, index) => (
+                {/* Original data points with PDF-safe colors */}
+                {individualCurves.map((curve, index) => (
                   <Scatter
                     key={`${curve.sampleName || 'curve'}_${index}_original`}
                     name={curve.sampleName}
                     dataKey={`${curve.sampleName}_original`}
-                    fill={curveColors[index] || '#8884d8'}
+                    fill={curveColors[index] || '#000000'}
                     shape="square"
                     legendType="none"
+                    r={5}
                   >
                     {/* Add error bars if we have custom groups (replicates) and valid data */}
                     {hasCustomGroups && curve.meanPoints && 
@@ -241,8 +485,8 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
                       validChartData.every(row => Number.isFinite(row[`${curve.sampleName}_sem`])) && (
                       <ErrorBar
                         dataKey={`${curve.sampleName}_sem`}
-                        width={4}
-                        stroke={curveColors[index] || '#8884d8'}
+                        width={5}
+                        stroke={curveColors[index] || '#000000'}
                         direction="y"
                         strokeWidth={2}
                       />
@@ -269,7 +513,7 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
                     <>
                       {/* Group columns */}
                       {Array.from(new Set(data[0].replicateGroups || [])).map((groupName, index) => (
-                        <th key={`group-${groupName || 'group'}_${index}`} className="border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-700 bg-blue-50">
+                        <th key={`group-${groupName || 'group'}_${index}`} className="border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-700 bg-[#8A0051]/10">
                           {groupName} (Group Mean ± SEM)
                         </th>
                       ))}
@@ -282,7 +526,7 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
                     </>
                   ) : (
                     // Show only individual columns
-                    fittedCurves.map((curve, index) => (
+                    individualCurves.map((curve, index) => (
                       <th key={`${curve.sampleName || 'curve'}_${index}_header`} className="border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-700">
                         {curve.sampleName} (%)
                       </th>
@@ -304,7 +548,7 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
                           const groupCurve = fittedCurves.find(curve => curve.sampleName === groupName);
                           const groupMeanPoint = groupCurve?.meanPoints?.find(pt => Math.abs(pt.x - row.concentration) < 1e-8);
                           return (
-                            <td key={`groupval-${groupName || 'group'}_${groupIndex}`} className="border border-gray-300 px-3 py-2 bg-blue-50">
+                            <td key={`groupval-${groupName || 'group'}_${groupIndex}`} className="border border-gray-300 px-3 py-2 bg-[#8A0051]/10">
                               {groupMeanPoint ? `${Number(groupMeanPoint.y).toPrecision(2)} ± ${Number(groupMeanPoint.sem).toPrecision(2)}` : '-'}
                             </td>
                           );
@@ -334,4 +578,8 @@ export default function ResultsDisplay({ data, fittedCurves, curveColors }: Resu
       )}
     </div>
   );
-} 
+});
+
+ResultsDisplay.displayName = 'ResultsDisplay';
+
+export default ResultsDisplay;

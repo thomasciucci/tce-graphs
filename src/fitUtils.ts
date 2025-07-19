@@ -109,6 +109,7 @@ export function fitCurvesForData(data: DataPoint[]): FittedCurve[] {
     });
   }
   if (hasCustomGroups) {
+    // Process custom groups (replicates)
     Object.entries(groupMap).forEach(([group, colIndices]) => {
       const meanResponses: number[] = [];
       const sems: number[] = [];
@@ -129,6 +130,8 @@ export function fitCurvesForData(data: DataPoint[]): FittedCurve[] {
       curve.meanPoints = concentrations.map((x, i) => ({ x, y: meanResponses[i], sem: sems[i] }));
       curves.push(curve);
     });
+    
+    // Also process individual replicates for display
     sampleNames.forEach((name, i) => {
       const responses = data.map(d => d.responses[i]);
       const validResponses = responses.filter(v => typeof v === 'number' && !isNaN(v));
@@ -138,15 +141,18 @@ export function fitCurvesForData(data: DataPoint[]): FittedCurve[] {
       curve.originalPoints = concentrations.map((x, idx) => ({ x, y: responses[idx] }));
       curves.push(curve);
     });
+  } else {
+    // Process individual samples (no custom groups)
+    Object.entries(groupMap).forEach(([, colIndices]) => {
+      const responses = data.map(d => d.responses[colIndices[0]]);
+      const validResponses = responses.filter(v => typeof v === 'number' && !isNaN(v));
+      if (validResponses.length < 3) return;
+      const curve = fitCurve(concentrations, responses.map(v => (typeof v === 'number' && !isNaN(v) ? v : 0)));
+      // Always use the actual sample/column name for the curve name
+      curve.sampleName = sampleNames[colIndices[0]];
+      curve.originalPoints = concentrations.map((x, i) => ({ x, y: responses[i] }));
+      curves.push(curve);
+    });
   }
-  Object.entries(groupMap).forEach(([group, colIndices]) => {
-    const responses = data.map(d => d.responses[colIndices[0]]);
-    const validResponses = responses.filter(v => typeof v === 'number' && !isNaN(v));
-    if (validResponses.length < 3) return;
-    const curve = fitCurve(concentrations, responses.map(v => (typeof v === 'number' && !isNaN(v) ? v : 0)));
-    curve.sampleName = group;
-    curve.originalPoints = concentrations.map((x, i) => ({ x, y: responses[i] }));
-    curves.push(curve);
-  });
   return curves;
 } 

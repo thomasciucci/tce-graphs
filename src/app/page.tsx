@@ -1,16 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import FileUpload from '../components/FileUpload';
 import DataEditor from '../components/DataEditor';
 import CurveFitter from '../components/CurveFitter';
 import ResultsDisplay from '../components/ResultsDisplay';
+import { exportToPDF, captureChartImage } from '../utils/pdfExport';
+
 import { DataPoint, FittedCurve, Dataset } from '../types';
 import { fitCurvesForData } from '../fitUtils';
+import React from 'react';
+import { Dialog } from '@headlessui/react';
+
 
 const defaultColors = [
-  '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
-  '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+  '#1f77b4', '#2ca02c', '#ff7f0e', '#d62728', '#9467bd', '#8c564b', // Blue, Light Green, Orange, Brown, Purple, Dark Green
+  '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#a6cee3', '#fb9a99',
+  '#fdbf6f', '#cab2d6', '#ffff99', '#b15928', '#fdb462', '#b3de69', '#fccde5', '#d9d9d9'
 ];
 
 export default function Home() {
@@ -24,47 +30,269 @@ export default function Home() {
   const [activeDatasetIndex, setActiveDatasetIndex] = useState(0);
   const [isFittingAll, setIsFittingAll] = useState(false);
   const [curveColorsByDataset, setCurveColorsByDataset] = useState<Record<string, string[]>>({});
+  const [fitAllProgress, setFitAllProgress] = useState(0);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  
+  // Add state to track original data for PDF export
+  const [originalDataByDataset, setOriginalDataByDataset] = useState<Record<string, DataPoint[]>>({});
+  const [editedDataByDataset, setEditedDataByDataset] = useState<Record<string, DataPoint[]>>({});
 
+  const [showReplicatePrompt, setShowReplicatePrompt] = useState(false);
+  const [showColumnEditor, setShowColumnEditor] = useState(false);
+  const [pendingData, setPendingData] = useState<DataPoint[] | null>(null);
+  const [pendingDatasets, setPendingDatasets] = useState<Dataset[]>([]);
+  const [currentTableIndex, setCurrentTableIndex] = useState(0);
+  const [workflowOptions, setWorkflowOptions] = useState({
+    hasReplicates: false,
+    mergeTables: false,
+    sameFormat: false,
+    groupAssignments: [] as string[]
+  });
+
+  // Add ref for chart capture
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  // Current data and dataset tracking - use edited data for display
+  const currentDatasetId = datasets.length > 0 ? datasets[activeDatasetIndex]?.id : undefined;
+  const currentData = datasets.length > 0 
+    ? (currentDatasetId ? editedDataByDataset[currentDatasetId] || datasets[activeDatasetIndex]?.data || [] : [])
+    : data;
+  
+  // Helper function to get display column names for multiple tables
+  const getDisplayColumnNames = () => {
+    if (pendingData) {
+      return pendingData[0]?.sampleNames || [];
+    }
+    
+    if (workflowOptions.mergeTables) {
+      // When merging, show all columns from all tables with table name prefixes
+      return pendingDatasets.flatMap(ds => 
+        ds.data[0]?.sampleNames.map(colName => `${ds.name}: ${colName}`) || []
+      );
+    } else {
+      // When not merging, show current table's columns
+      return pendingDatasets[currentTableIndex]?.data[0]?.sampleNames || [];
+    }
+  };
+  
+  // Debug logging
+  console.log('Current state:', {
+    dataLength: data.length,
+    datasetsLength: datasets.length,
+    activeDatasetIndex,
+    currentDataLength: currentData.length,
+    pendingDataLength: pendingData?.length || 0,
+    showReplicatePrompt,
+    showColumnEditor
+  });
+
+  // Update fitted curves when switching datasets
+  useEffect(() => {
+    if (datasets.length > 0 && currentDatasetId) {
+      if (fittedCurvesByDataset[currentDatasetId]) {
+        setFittedCurves(fittedCurvesByDataset[currentDatasetId]);
+        setCurveColors(curveColorsByDataset[currentDatasetId] || []);
+      } else {
+        setFittedCurves([]);
+        setCurveColors([]);
+      }
+    }
+  }, [datasets, activeDatasetIndex, fittedCurvesByDataset, currentDatasetId, curveColorsByDataset]);
+
+  // Update original data tracking when datasets are set (preserve original, initialize edited)
+  useEffect(() => {
+    const newOriginalData: Record<string, DataPoint[]> = {};
+    const newEditedData: Record<string, DataPoint[]> = {};
+    
+    datasets.forEach(dataset => {
+      // Only set original data if it hasn't been set before (preserve the first import)
+      if (!originalDataByDataset[dataset.id]) {
+        newOriginalData[dataset.id] = JSON.parse(JSON.stringify(dataset.data)); // Deep copy
+      } else {
+        newOriginalData[dataset.id] = originalDataByDataset[dataset.id]; // Keep existing original
+      }
+      
+      // Set edited data to current dataset data
+      newEditedData[dataset.id] = JSON.parse(JSON.stringify(dataset.data)); // Deep copy
+    });
+    
+    setOriginalDataByDataset(newOriginalData);
+    setEditedDataByDataset(newEditedData);
+  }, [datasets]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Optimized workflow state
   const handleDataUpload = (uploadedData: DataPoint[]) => {
-    setData(uploadedData);
-    setDatasets([]); // Clear datasets when using combined mode
+    setPendingData(uploadedData);
+    setPendingDatasets([]);
+    setShowReplicatePrompt(true);
+    setShowColumnEditor(false);
+    setData([]);
+    setDatasets([]);
     setFittedCurves([]);
   };
 
+  // Multiple tables import - go directly to comprehensive configuration
   const handleMultipleDatasetsUpload = (uploadedDatasets: Dataset[]) => {
-    setDatasets(uploadedDatasets);
-    setData([]); // Clear single data when using separate mode
+    setPendingData(null);
+    setPendingDatasets(uploadedDatasets);
+    setShowColumnEditor(true);
+    setShowReplicatePrompt(false);
+    setData([]);
+    setDatasets([]);
     setFittedCurves([]);
-    setActiveDatasetIndex(0);
   };
+
+  // Single table: replicate prompt (keep this simple for single tables)
+  const handleReplicatePrompt = (hasReps: boolean) => {
+    setWorkflowOptions(prev => ({ ...prev, hasReplicates: hasReps }));
+    setShowReplicatePrompt(false);
+    setShowColumnEditor(true);
+  };
+
+  // Remove the separate same format prompt handler since it's now integrated
+
+  // Column editor save handler
+  const handleColumnEditorSave = (columnNames: string[], groupAssignments: string[]) => {
+    console.log('Column editor save called:', { columnNames, groupAssignments, pendingData: !!pendingData, pendingDatasetsLength: pendingDatasets.length });
+    
+    if (pendingData) {
+      // Single table
+      const updatedData = pendingData.map(row => ({
+        ...row,
+        sampleNames: columnNames,
+        replicateGroups: workflowOptions.hasReplicates ? groupAssignments : undefined,
+      }));
+      console.log('Setting single table data:', updatedData.length, 'rows');
+      setData(updatedData);
+      setShowColumnEditor(false);
+      setPendingData(null);
+      
+      // Auto-fit curves for single table to improve UX
+      setTimeout(() => {
+        const curves = fitCurvesForData(updatedData);
+        setFittedCurves(curves);
+        setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+      }, 100);
+    } else if (pendingDatasets.length > 0) {
+      if (workflowOptions.mergeTables) {
+        // Merge all tables into one dataset
+        const allData: DataPoint[] = [];
+        
+        // Collect all unique concentrations from all tables
+        const allConcentrations = new Set<number>();
+        pendingDatasets.forEach(dataset => {
+          dataset.data.forEach(row => {
+            allConcentrations.add(row.concentration);
+          });
+        });
+        const sortedConcentrations = Array.from(allConcentrations).sort((a, b) => a - b);
+        
+        // Create merged data points for each concentration
+        sortedConcentrations.forEach(concentration => {
+          const mergedRow: DataPoint = {
+            concentration,
+            responses: [],
+            sampleNames: columnNames, // Use the columnNames passed from the editor (which are the prefixed names)
+            replicateGroups: workflowOptions.hasReplicates ? groupAssignments : undefined,
+          };
+          
+          // Collect responses from all tables for this concentration
+          pendingDatasets.forEach(dataset => {
+            const matchingRow = dataset.data.find(row => Math.abs(row.concentration - concentration) < 1e-6);
+            if (matchingRow) {
+              mergedRow.responses.push(...matchingRow.responses);
+            }
+          });
+          
+          allData.push(mergedRow);
+        });
+        
+        console.log('Merged data:', allData.length, 'rows with', allData[0]?.responses.length, 'responses each');
+        setData(allData);
+        setShowColumnEditor(false);
+        setPendingDatasets([]);
+        
+        // Auto-fit curves for merged data
+        setTimeout(() => {
+          const curves = fitCurvesForData(allData);
+          setFittedCurves(curves);
+          setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+        }, 100);
+      } else if (workflowOptions.sameFormat) {
+        // Apply to all tables
+        const updatedDatasets = pendingDatasets.map(ds => ({
+          ...ds,
+          data: ds.data.map(row => ({
+            ...row,
+            sampleNames: columnNames,
+            replicateGroups: groupAssignments,
+          })),
+        }));
+        setDatasets(updatedDatasets);
+        setShowColumnEditor(false);
+        setPendingDatasets([]);
+      } else {
+        // Per-table editing
+        const updatedDatasets = [...pendingDatasets];
+        updatedDatasets[currentTableIndex] = {
+          ...updatedDatasets[currentTableIndex],
+          data: updatedDatasets[currentTableIndex].data.map(row => ({
+            ...row,
+            sampleNames: columnNames,
+            replicateGroups: groupAssignments,
+          })),
+        };
+        setPendingDatasets(updatedDatasets);
+        if (currentTableIndex + 1 < updatedDatasets.length) {
+          setCurrentTableIndex(currentTableIndex + 1);
+        } else {
+          setDatasets(updatedDatasets);
+          setShowColumnEditor(false);
+          setPendingDatasets([]);
+        }
+      }
+    }
+  };
+
 
   const handleDataUpdate = (updatedData: DataPoint[]) => {
     if (datasets.length > 0) {
-      // Update the active dataset
-      const updatedDatasets = [...datasets];
-      updatedDatasets[activeDatasetIndex] = {
-        ...updatedDatasets[activeDatasetIndex],
-        data: updatedData
-      };
-      setDatasets(updatedDatasets);
-      // Clear fit for this dataset
-      const datasetId = updatedDatasets[activeDatasetIndex]?.id;
+      // DO NOT update the original dataset - only update edited data tracking
+      const datasetId = datasets[activeDatasetIndex]?.id;
       if (datasetId) {
+        // Update only the edited data tracking - preserve original dataset
+        setEditedDataByDataset(prev => ({
+          ...prev,
+          [datasetId]: JSON.parse(JSON.stringify(updatedData)) // Deep copy
+        }));
+        
+        // Clear fit for this dataset since data changed
         setFittedCurvesByDataset(prev => {
           const copy = { ...prev };
           delete copy[datasetId];
           return copy;
         });
+        setFittedCurves([]);
+        setCurveColors([]);
       }
     } else {
+      // For single dataset mode, preserve original and update edited
+      if (!originalDataByDataset['single']) {
+        setOriginalDataByDataset(prev => ({
+          ...prev,
+          'single': JSON.parse(JSON.stringify(data)) // Preserve current as original
+        }));
+      }
       setData(updatedData);
+      setEditedDataByDataset(prev => ({
+        ...prev,
+        'single': JSON.parse(JSON.stringify(updatedData))
+      }));
     }
-    setFittedCurves([]);
   };
 
   const handleCurveFitting = async (curves: FittedCurve[]) => {
     setFittedCurves(curves);
-    setIsProcessing(false);
     if (datasets.length > 0) {
       const datasetId = datasets[activeDatasetIndex]?.id;
       if (datasetId) {
@@ -78,6 +306,7 @@ export default function Home() {
     } else {
       setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
     }
+    setIsProcessing(false);
   };
 
   const handleRefresh = () => {
@@ -87,21 +316,35 @@ export default function Home() {
   // Simulate curve fitting for all datasets (replace with your actual fitting logic if async)
   const fitAllCurves = async () => {
     setIsFittingAll(true);
+    setFitAllProgress(0);
     try {
       const newFitted: Record<string, FittedCurve[]> = { ...fittedCurvesByDataset };
+      const newColors: Record<string, string[]> = { ...curveColorsByDataset };
+      
       for (let i = 0; i < datasets.length; i++) {
         const dataset = datasets[i];
-        // Use the utility to fit curves for this dataset
-        newFitted[dataset.id] = fitCurvesForData(dataset.data);
+        // Use edited data for curve fitting instead of original dataset data
+        const dataToFit = editedDataByDataset[dataset.id] || dataset.data;
+        const curves = fitCurvesForData(dataToFit);
+        newFitted[dataset.id] = curves;
+        // Set colors for this dataset
+        newColors[dataset.id] = curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
+        setFitAllProgress(((i + 1) / datasets.length) * 100);
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
+      
       setFittedCurvesByDataset(newFitted);
+      setCurveColorsByDataset(newColors);
+      
       // Set current tab's fit if available
       const currentId = datasets[activeDatasetIndex]?.id;
       if (currentId && newFitted[currentId]) {
         setFittedCurves(newFitted[currentId]);
+        setCurveColors(newColors[currentId] || []);
       }
     } finally {
       setIsFittingAll(false);
+      setFitAllProgress(0);
     }
   };
 
@@ -110,58 +353,109 @@ export default function Home() {
     if (datasets.length > 1) {
       await fitAllCurves();
     } else if (datasets.length === 1) {
-      // Fit just the single dataset
+      // Fit just the single dataset using edited data
       const dataset = datasets[0];
-      const curves = fitCurvesForData(dataset.data);
+      const dataToFit = editedDataByDataset[dataset.id] || dataset.data;
+      const curves = fitCurvesForData(dataToFit);
       setFittedCurves(curves);
       setFittedCurvesByDataset(prev => ({ ...prev, [dataset.id]: curves }));
+      // Set colors for this dataset
+      setCurveColorsByDataset(prev => ({ ...prev, [dataset.id]: curves.map((_, idx) => defaultColors[idx % defaultColors.length]) }));
+      setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
     } else if (data.length > 0) {
-      // Single dataset in 'data' (not in datasets array)
-      const curves = fitCurvesForData(data);
+      // Single dataset in 'data' (not in datasets array) - use edited data if available
+      const dataToFit = editedDataByDataset['single'] || data;
+      const curves = fitCurvesForData(dataToFit);
       setFittedCurves(curves);
+      setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
     }
   };
 
-  // Get current data (either single dataset or active dataset)
-  const currentData = datasets.length > 0 ? datasets[activeDatasetIndex]?.data || [] : data;
-  const currentDatasetId = datasets.length > 0 ? datasets[activeDatasetIndex]?.id : undefined;
-
-  // Restore fit for current dataset on mount or when datasets/activeDatasetIndex change
-  useEffect(() => {
-    if (datasets.length > 0 && currentDatasetId) {
-      if (fittedCurvesByDataset[currentDatasetId]) {
-        setFittedCurves(fittedCurvesByDataset[currentDatasetId]);
+  // Update PDF export handler to include chart
+  const handleExportPDF = async () => {
+    if (isExportingPDF) return; // Prevent multiple simultaneous exports
+    
+    try {
+      setIsExportingPDF(true);
+      console.log('Starting PDF export...');
+      
+      // Capture chart image if available
+      let chartImage = '';
+      if (chartRef.current) {
+        console.log('Chart ref found, attempting to capture...');
+        
+        try {
+          // Give the chart extra time to render fully
+          console.log('Waiting for chart to render...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Call the improved capture function
+          const capturedImage = await captureChartImage();
+          console.log('Chart image captured:', capturedImage ? 'Success' : 'Failed');
+          
+          if (capturedImage) {
+            chartImage = capturedImage;
+            console.log('Image data length:', chartImage.length);
+          } else {
+            console.log('Chart capture returned null');
+          }
+        } catch (captureError) {
+          console.error('Error during chart capture:', captureError);
+        }
       } else {
-        setFittedCurves([]);
+        console.log('Chart ref not found - make sure ResultsDisplay is rendered');
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasets, activeDatasetIndex]);
 
-  // When switching datasets, update curve colors for the active dataset
-  useEffect(() => {
-    if (datasets.length > 0) {
-      const datasetId = datasets[activeDatasetIndex]?.id;
-      if (datasetId && curveColorsByDataset[datasetId]) {
-        setCurveColors(curveColorsByDataset[datasetId]);
-      } else if (datasetId && fittedCurvesByDataset[datasetId]) {
-        setCurveColors(fittedCurvesByDataset[datasetId].map((_, idx) => defaultColors[idx % defaultColors.length]));
-      }
+      const exportOptions = {
+        datasets: datasets.length > 0 ? datasets : [{ id: 'single', name: 'Single Dataset', data, assayType: 'Not specified' }],
+        fittedCurvesByDataset: datasets.length > 0 ? fittedCurvesByDataset : { 'single': fittedCurves },
+        originalDataByDataset: datasets.length > 0 ? originalDataByDataset : { 'single': originalDataByDataset['single'] || data },
+        editedDataByDataset: datasets.length > 0 ? editedDataByDataset : { 'single': editedDataByDataset['single'] || data },
+        curveColorsByDataset: datasets.length > 0 ? curveColorsByDataset : { 'single': curveColors },
+        assayType: datasets[activeDatasetIndex]?.assayType,
+        chartImage,
+        // Add callback to switch datasets during PDF generation
+        onDatasetSwitch: datasets.length > 1 ? async (datasetIndex: number) => {
+          console.log(`PDF Export: Switching to dataset ${datasetIndex}`);
+          await handleSwitchDataset(datasetIndex);
+        } : undefined
+      };
+      
+      console.log('Starting PDF export with options:', exportOptions);
+      await exportToPDF(exportOptions);
+      console.log('PDF export completed successfully');
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('Failed to export PDF. Please try again.');
+    } finally {
+      setIsExportingPDF(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDatasetIndex, datasets, curveColorsByDataset, fittedCurvesByDataset]);
+  };
+
+  // Check if we have results to export
+  const hasResults = datasets.length > 0 
+    ? Object.keys(fittedCurvesByDataset).length > 0
+    : fittedCurves.length > 0;
 
   // Handler for switching datasets
-  const handleSwitchDataset = (index: number) => {
+  const handleSwitchDataset = async (index: number) => {
+    console.log(`Switching to dataset ${index}: ${datasets[index]?.name}`);
     setActiveDatasetIndex(index);
+    
     // Restore fit for this dataset if available
     const datasetId = datasets[index]?.id;
     if (datasetId && fittedCurvesByDataset[datasetId]) {
       setFittedCurves(fittedCurvesByDataset[datasetId]);
+      setCurveColors(curveColorsByDataset[datasetId] || []);
     } else {
       setFittedCurves([]);
+      setCurveColors([]);
     }
+    
     setRefreshKey(prev => prev + 1); // Force ResultsDisplay to re-render
+    
+    // Wait for state to update and component to re-render
+    await new Promise(resolve => setTimeout(resolve, 100));
   };
 
   // Handle color change for current dataset
@@ -195,116 +489,399 @@ export default function Home() {
         <h1 className="text-3xl font-bold text-gray-900 mb-8">
           Dose Response Analyses
         </h1>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left Column - Data Input */}
-          <div className="space-y-6">
-            <FileUpload 
-              onDataUpload={handleDataUpload} 
-              onMultipleDatasetsUpload={handleMultipleDatasetsUpload}
-            />
-            
-            {currentData.length > 0 && (
-              <>
-                {/* Dataset Tabs (only show when multiple datasets) */}
-                {datasets.length > 1 && (
-                  <div className="bg-white p-4 rounded-lg shadow">
-                    <div className="mb-4 flex items-center gap-4">
-                      <button
-                        onClick={handleFitButton}
-                        disabled={isFittingAll}
-                        className="px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 disabled:opacity-50"
-                      >
-                        {isFittingAll
-                          ? (datasets.length > 1 ? 'Fitting All...' : 'Fitting...')
-                          : (datasets.length > 1 ? 'Fit All Curves' : 'Fit Curve')}
-                      </button>
-                      {isFittingAll && <span className="text-green-700 text-sm">Fitting{datasets.length > 1 ? ' all datasets' : ''}...</span>}
-                    </div>
-                    {/* Curve color pickers for active dataset */}
-                    {fittedCurves.length > 0 && (
-                      <div className="mb-4">
-                        <h4 className="font-medium text-gray-900 mb-2">Curve Colors</h4>
-                        <div className="flex flex-wrap gap-4">
-                          {fittedCurves.map((curve, idx) => (
-                            <div key={`${curve.sampleName || 'curve'}_${idx}`} className="flex items-center gap-2">
-                              <span className="text-sm">{curve.sampleName}</span>
-                              <input
-                                type="color"
-                                value={curveColors[idx] || defaultColors[idx % defaultColors.length]}
-                                onChange={e => handleColorChange(idx, e.target.value)}
-                              />
-                              <span className="ml-1 text-xs">{curveColors[idx] || defaultColors[idx % defaultColors.length]}</span>
+                          {/* Single Table: Replicate Prompt */}
+         <Dialog open={showReplicatePrompt} onClose={() => setShowReplicatePrompt(false)}>
+           <Dialog.Panel className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-30">
+             <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+               <h2 className="text-xl font-semibold mb-4">Technical Replicates?</h2>
+               <p className="mb-6">Are there technical replicates in this dataset?</p>
+               <div className="flex gap-4 justify-end">
+                 <button className="bg-[#8A0051] text-white px-4 py-2 rounded hover:bg-[#6A003F]" onClick={() => handleReplicatePrompt(true)}>Yes</button>
+                 <button className="bg-gray-200 px-4 py-2 rounded" onClick={() => handleReplicatePrompt(false)}>No</button>
+               </div>
+             </div>
+           </Dialog.Panel>
+         </Dialog>
+
+
+
+         {/* Column Editor Modal */}
+         {showColumnEditor && (
+           <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-30">
+             <div className="bg-white p-8 rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+               <h2 className="text-xl font-semibold mb-4">
+                 {pendingData ? 'Configure Dataset' : 'Configure Multiple Tables'}
+               </h2>
+               
+               {/* Multiple Tables: Comprehensive Options */}
+               {!pendingData && (
+                 <div className="mb-6 space-y-6">
+                   {/* Analysis Method */}
+                   <div>
+                     <h3 className="font-medium text-gray-900 mb-3">1. How do you want to analyze your data?</h3>
+                     <div className="space-y-2">
+                       <div className="flex items-center">
+                         <input
+                           type="radio"
+                           id="merge"
+                           name="analysisOption"
+                           checked={workflowOptions.mergeTables}
+                           onChange={() => setWorkflowOptions(prev => ({ ...prev, mergeTables: true }))}
+                           className="mr-2"
+                         />
+                         <label htmlFor="merge">Merge all tables into one graph</label>
+                       </div>
+                       <div className="flex items-center">
+                         <input
+                           type="radio"
+                           id="separate"
+                           name="analysisOption"
+                           checked={!workflowOptions.mergeTables}
+                           onChange={() => setWorkflowOptions(prev => ({ ...prev, mergeTables: false }))}
+                           className="mr-2"
+                         />
+                         <label htmlFor="separate">Keep tables separate</label>
+                       </div>
+                     </div>
+                   </div>
+
+                   {/* Replicates Option */}
+                   <div>
+                     <h3 className="font-medium text-gray-900 mb-3">2. Do you have technical replicates?</h3>
+                     <div className="flex items-center">
+                       <input
+                         type="checkbox"
+                         id="hasReplicates"
+                         checked={workflowOptions.hasReplicates}
+                         onChange={e => setWorkflowOptions(prev => ({ ...prev, hasReplicates: e.target.checked }))}
+                         className="mr-2"
+                       />
+                       <label htmlFor="hasReplicates">My data includes technical replicates</label>
+                     </div>
+                   </div>
+
+                   {/* Table Format Option - only show when NOT merging */}
+                   {!workflowOptions.mergeTables && (
+                     <div>
+                       <h3 className="font-medium text-gray-900 mb-3">3. Do all tables have the same format?</h3>
+                       <div className="space-y-2">
+                         <div className="flex items-center">
+                           <input
+                             type="radio"
+                             id="sameFormat"
+                             name="formatOption"
+                             checked={workflowOptions.sameFormat}
+                             onChange={() => setWorkflowOptions(prev => ({ ...prev, sameFormat: true }))}
+                             className="mr-2"
+                           />
+                           <label htmlFor="sameFormat">Yes, all tables have the same format</label>
+                         </div>
+                         <div className="flex items-center">
+                           <input
+                             type="radio"
+                             id="differentFormat"
+                             name="formatOption"
+                             checked={!workflowOptions.sameFormat}
+                             onChange={() => setWorkflowOptions(prev => ({ ...prev, sameFormat: false }))}
+                             className="mr-2"
+                           />
+                           <label htmlFor="differentFormat">No, tables have different formats</label>
+                         </div>
+                       </div>
+                     </div>
+                   )}
+                 </div>
+               )}
+
+               {/* Single Table: Replicates Option */}
+               {pendingData && (
+                 <div className="mb-6">
+                   <h3 className="font-medium text-gray-900 mb-3">Do you have technical replicates?</h3>
+                   <div className="flex items-center">
+                     <input
+                       type="checkbox"
+                       id="hasReplicates"
+                       checked={workflowOptions.hasReplicates}
+                       onChange={e => setWorkflowOptions(prev => ({ ...prev, hasReplicates: e.target.checked }))}
+                       className="mr-2"
+                     />
+                     <label htmlFor="hasReplicates">My data includes technical replicates</label>
+                   </div>
+                 </div>
+               )}
+               
+               {/* Column Names Editing */}
+               <div className="mb-6">
+                 <h3 className="font-medium text-gray-900 mb-3">
+                   {pendingData ? 'Column Names' : 
+                    workflowOptions.mergeTables ? 'Column Names (All Tables Combined)' :
+                    workflowOptions.sameFormat ? 'Column Names (Applied to All Tables)' : 
+                    `Column Names: ${pendingDatasets[currentTableIndex]?.name || 'Unknown Table'} (${currentTableIndex + 1} of ${pendingDatasets.length})`}
+                 </h3>
+                 <div className="space-y-2">
+                   {getDisplayColumnNames().map((name, index) => (
+                     <div key={index} className="flex items-center gap-2">
+                       <span className="text-sm font-medium w-20">Column {index + 1}:</span>
+                       <input
+                         type="text"
+                         value={name}
+                         onChange={e => {
+                           const displayNames = getDisplayColumnNames();
+                           const newDisplayNames = [...displayNames];
+                           newDisplayNames[index] = e.target.value;
+                           
+                           if (pendingData) {
+                             setPendingData(prev => prev ? prev.map(row => ({ ...row, sampleNames: newDisplayNames })) : null);
+                           } else if (workflowOptions.mergeTables) {
+                             // When merging, we need to parse the prefixed names back to individual table names
+                             // For now, just update the display names - the actual merging will happen in handleColumnEditorSave
+                             // This is a simplified approach - in a full implementation, we'd need to parse the prefixes
+                           } else {
+                             setPendingDatasets(prev => prev.map((ds, idx) => 
+                               idx === currentTableIndex ? {
+                                 ...ds,
+                                 data: ds.data.map(row => ({ ...row, sampleNames: newDisplayNames }))
+                               } : ds
+                             ));
+                           }
+                         }}
+                         className="border rounded px-2 py-1 flex-1"
+                       />
+                     </div>
+                   ))}
+                 </div>
+               </div>
+
+               {/* Replicate Group Assignment */}
+               {workflowOptions.hasReplicates && (
+                 <div className="mb-6">
+                   <h3 className="font-medium text-gray-900 mb-3">Assign Replicate Groups</h3>
+                   <div className="space-y-2">
+                     {getDisplayColumnNames().map((name, index) => (
+                       <div key={index} className="flex items-center gap-2">
+                         <span className="text-sm font-medium w-32">{name}:</span>
+                         <select
+                           value={workflowOptions.groupAssignments?.[index] || ''}
+                           onChange={e => {
+                             const newAssignments = [...(workflowOptions.groupAssignments || [])];
+                             newAssignments[index] = e.target.value;
+                             setWorkflowOptions(prev => ({ ...prev, groupAssignments: newAssignments }));
+                           }}
+                           className="border rounded px-2 py-1 flex-1"
+                         >
+                           <option value="">Select group...</option>
+                           {Array.from(new Set((workflowOptions.groupAssignments || []).filter(Boolean))).map(group => (
+                             <option key={group} value={group}>{group}</option>
+                           ))}
+                           <option value="new">+ New Group</option>
+                         </select>
+                         {workflowOptions.groupAssignments?.[index] === 'new' && (
+                           <input
+                             type="text"
+                             placeholder="Group name"
+                             className="border rounded px-2 py-1 flex-1"
+                             onBlur={e => {
+                               const newAssignments = [...(workflowOptions.groupAssignments || [])];
+                               newAssignments[index] = e.target.value;
+                               setWorkflowOptions(prev => ({ ...prev, groupAssignments: newAssignments }));
+                             }}
+                           />
+                         )}
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               )}
+
+               <div className="flex justify-end gap-4">
+                 <button
+                   className="bg-gray-200 px-4 py-2 rounded"
+                   onClick={() => setShowColumnEditor(false)}
+                 >
+                   Cancel
+                 </button>
+                 <button
+                   className="bg-[#8A0051] text-white px-4 py-2 rounded hover:bg-[#6A003F]"
+                   onClick={() => handleColumnEditorSave(
+                     getDisplayColumnNames(),
+                     workflowOptions.groupAssignments || []
+                   )}
+                 >
+                   Apply Configuration
+                 </button>
+               </div>
+             </div>
+           </div>
+         )}
+ 
+         {!showReplicatePrompt && !showColumnEditor && (
+          <div className="space-y-8">
+            {/* Top Section - Data Input Controls */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Left Column - File Upload, Fit All Curves, and Assay Summary */}
+              <div className="space-y-6">
+                <FileUpload 
+                  onDataUpload={handleDataUpload}
+                  onMultipleDatasetsUpload={handleMultipleDatasetsUpload}
+                />
+                
+                {currentData.length > 0 && (
+                  <>
+                    {/* Prominent Fit All Curves Button (only show when multiple datasets) */}
+                    {datasets.length > 1 && (
+                      <div className="bg-white p-6 rounded-lg shadow">
+                        <div className="text-center">
+                          <h3 className="text-lg font-medium text-gray-900 mb-4">Calculate Results for All Datasets</h3>
+                          <button
+                            onClick={handleFitButton}
+                            disabled={isFittingAll}
+                            className="px-8 py-4 bg-[#8A0051] text-white rounded-lg hover:bg-[#6A003F] disabled:opacity-50 text-lg font-medium transition-colors shadow-lg hover:shadow-xl"
+                          >
+                            {isFittingAll ? 'Calculating Results...' : 'Calculate Results'}
+                          </button>
+                          {isFittingAll && (
+                            <div className="mt-4">
+                              <div className="mb-2 text-[#8A0051] text-sm font-medium">
+                                Calculating results... {Math.round(fitAllProgress)}%
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-3">
+                                <div className="bg-[#8A0051] h-3 rounded-full transition-all duration-300" style={{ width: `${fitAllProgress}%` }}></div>
+                              </div>
+                              <div className="mt-2 text-gray-600 text-xs">
+                                Processing {datasets.length} dataset{datasets.length !== 1 ? 's' : ''}...
+                              </div>
                             </div>
-                          ))}
+                          )}
                         </div>
                       </div>
                     )}
-                    <h3 className="font-medium text-gray-900 mb-3">Select Dataset</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {datasets.map((dataset, index) => {
-                        // Use the best keyword for the tab label
-                        let label = dataset.name;
-                        const genericPattern = /^data table/i;
-                        if (genericPattern.test(label)) {
-                          // Try to find a better keyword in sample names
-                          const sampleText = (dataset.data?.flatMap(d => d.sampleNames).join(' ') || '').toLowerCase();
-                          if (sampleText.includes('cytotoxicity') || sampleText.includes('killing')) {
-                            label = 'Cytotoxicity';
-                          } else if (sampleText.includes('cd4')) {
-                            label = 'CD4 Activation';
-                          } else if (sampleText.includes('cd8')) {
-                            label = 'CD8 Activation';
-                          }
-                        }
-                        return (
-                          <button
-                            key={`${dataset.id || ''}_${index}`}
-                            onClick={() => handleSwitchDataset(index)}
-                            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                              index === activeDatasetIndex
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                
-                <DataEditor 
-                  data={currentData} 
-                  onDataUpdate={handleDataUpdate} 
-                />
-                
-                <CurveFitter 
-                  data={currentData}
-                  onCurveFitting={handleCurveFitting}
-                  isProcessing={isProcessing}
-                  curveColors={curveColors}
-                  setCurveColors={setCurveColors}
-                  onRefresh={handleRefresh}
-                  showFitButton={datasets.length <= 1}
-                />
-              </>
-            )}
-          </div>
+                    
+                    <CurveFitter 
+                      data={currentData}
+                      onCurveFitting={handleCurveFitting}
+                      isProcessing={isProcessing}
+                      curveColors={curveColors}
+                      setCurveColors={setCurveColors}
+                      onRefresh={handleRefresh}
+                      showFitButton={datasets.length <= 1}
+                      onProcessingChange={setIsProcessing}
+                    />
 
-          {/* Right Column - Results */}
-          <div className="space-y-6">
-            {((fittedCurves.length > 0) || (currentDatasetId && fittedCurvesByDataset[currentDatasetId]?.length > 0)) && (
-              <ResultsDisplay 
-                key={`${refreshKey}-${activeDatasetIndex}`}
-                data={currentData} 
-                fittedCurves={fittedCurves.length > 0 ? fittedCurves : (currentDatasetId ? fittedCurvesByDataset[currentDatasetId] : [])}
-                curveColors={curveColors}
-              />
+                    {/* Enhanced Quick Summary with Assay Characteristics */}
+                    {fittedCurves.length > 0 && (
+                      <div className="bg-white p-4 rounded-lg shadow">
+                        <h3 className="font-medium text-gray-900 mb-3">Assay Summary & Methods</h3>
+                        <div className="space-y-3 text-sm">
+                          <div className="border-b border-gray-200 pb-2">
+                            <h4 className="font-medium text-gray-800 mb-1">Dataset Information</h4>
+                            <p className="text-gray-600">• Dataset: {datasets.length > 0 ? datasets[activeDatasetIndex]?.name : 'Unknown'}</p>
+                            <p className="text-gray-600">• Assay Type: {datasets.length > 0 ? datasets[activeDatasetIndex]?.assayType : 'Unknown'}</p>
+                            <p className="text-gray-600">• Data Points: {currentData.length}</p>
+                            <p className="text-gray-600">• Concentration Range: {Math.min(...currentData.map(d => d.concentration)).toExponential(2)} - {Math.max(...currentData.map(d => d.concentration)).toExponential(2)} nM</p>
+                          </div>
+                          
+                          <div className="border-b border-gray-200 pb-2">
+                            <h4 className="font-medium text-gray-800 mb-1">Curve Fitting Results</h4>
+                            <p className="text-gray-600">• {fittedCurves.length} curve{fittedCurves.length !== 1 ? 's' : ''} fitted</p>
+                            <p className="text-gray-600">• Average R²: {(fittedCurves.reduce((sum, curve) => sum + curve.rSquared, 0) / fittedCurves.length).toFixed(3)}</p>
+                            <p className="text-gray-600">• EC50 Range: {Math.min(...fittedCurves.map(c => c.ec50)).toFixed(2)} - {Math.max(...fittedCurves.map(c => c.ec50)).toFixed(2)} nM</p>
+                          </div>
+                          
+                          <div>
+                            <h4 className="font-medium text-gray-800 mb-1">Analysis Method</h4>
+                            <p className="text-gray-600">• Four-parameter logistic regression</p>
+                            <p className="text-gray-600">• Log-scale concentration axis</p>
+                            <p className="text-gray-600">• Response range: 0-100%</p>
+                            <p className="text-gray-600">• Non-linear least squares fitting</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Right Column - Data Editor Only */}
+              <div className="space-y-6">
+                {currentData.length > 0 && (
+                  <DataEditor 
+                    data={currentData} 
+                    onDataUpdate={handleDataUpdate}
+                    datasets={datasets}
+                    activeDatasetIndex={activeDatasetIndex}
+                    onDatasetChange={(index) => handleSwitchDataset(index)}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Section - Full Width Graph */}
+            <div className="w-full">
+              {((fittedCurves.length > 0) || (currentDatasetId && fittedCurvesByDataset[currentDatasetId]?.length > 0)) && (
+                <ResultsDisplay 
+                  ref={chartRef}
+                  key={`${refreshKey}-${activeDatasetIndex}`}
+                  data={currentData} 
+                  fittedCurves={fittedCurves.length > 0 ? fittedCurves : (currentDatasetId ? fittedCurvesByDataset[currentDatasetId] : [])}
+                  curveColors={curveColors}
+                  datasetName={
+                    datasets.length > 0
+                      ? datasets[activeDatasetIndex]?.name
+                      : datasets.length === 1
+                        ? datasets[0]?.name
+                        : 'Dataset'
+                  }
+                  assayType={
+                    datasets.length > 0
+                      ? datasets[activeDatasetIndex]?.assayType
+                      : datasets.length === 1
+                        ? datasets[0]?.assayType
+                        : ''
+                  }
+                  onColorChange={handleColorChange}
+                  datasets={datasets}
+                  activeDatasetIndex={activeDatasetIndex}
+                  onDatasetChange={(index) => handleSwitchDataset(index)}
+                />
+              )}
+            </div>
+
+            {/* Export PDF button */}
+            {hasResults && (
+              <div className="bg-white p-6 rounded-lg shadow mb-6">
+                <div className="text-center">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Export Results</h3>
+                  <div className="space-y-3">
+                    <button
+                      onClick={handleExportPDF}
+                      disabled={isExportingPDF}
+                      className={`px-8 py-4 text-white rounded-lg text-lg font-medium transition-colors shadow-lg hover:shadow-xl ${
+                        isExportingPDF 
+                          ? 'bg-gray-400 cursor-not-allowed' 
+                          : 'bg-[#8A0051] hover:bg-[#6A003F]'
+                      }`}
+                    >
+                      {isExportingPDF ? (
+                        <div className="flex items-center gap-2">
+                          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                          </svg>
+                          Generating PDF...
+                        </div>
+                      ) : (
+                        'Export to PDF'
+                      )}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-sm text-gray-600">
+                    Generate a comprehensive report with raw data, edited data, and fitted curve results
+                  </p>
+                </div>
+              </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

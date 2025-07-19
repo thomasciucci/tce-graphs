@@ -21,10 +21,12 @@ interface CurveFitterProps {
   setCurveColors: React.Dispatch<React.SetStateAction<string[]>>;
   onRefresh?: () => void;
   showFitButton?: boolean; // NEW PROP
+  onProcessingChange?: (processing: boolean) => void;
 }
 
-export default function CurveFitter({ data, onCurveFitting, curveColors, setCurveColors, onRefresh, showFitButton = true }: CurveFitterProps) {
+export default function CurveFitter({ data, onCurveFitting, isProcessing, curveColors, setCurveColors, onRefresh, showFitButton = true, onProcessingChange }: CurveFitterProps) {
   const [fittedCurves, setFittedCurves] = useState<FittedCurve[]>([]);
+  const [progress, setProgress] = useState(0);
 
   // Four-parameter logistic equation
   const fourParameterLogistic = (x: number, top: number, bottom: number, ec50: number, hillSlope: number): number => {
@@ -116,7 +118,16 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
 
   const handleFitCurves = async () => {
     try {
+      // Set processing state to true at the start
+      if (onProcessingChange) {
+        onProcessingChange(true);
+      }
+      
       console.log('Starting curve fitting with data:', data);
+      
+      // Add a small delay to show the progress bar
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Group columns by replicate group
       const sampleNames = data[0]?.sampleNames || [];
       console.log('Sample names:', sampleNames);
@@ -152,9 +163,18 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
         });
       }
       
+      // Calculate total number of curves to fit for progress tracking
+      const totalCurves = hasCustomGroups 
+        ? Object.keys(groupMap).length + sampleNames.length 
+        : Object.keys(groupMap).length;
+      let completedCurves = 0;
+      
+      // Initialize progress
+      setProgress(0);
+      
       if (hasCustomGroups) {
         // User has defined custom replicate groups - fit curves for groups AND individual replicates
-        Object.entries(groupMap).forEach(([group, colIndices]) => {
+        for (const [group, colIndices] of Object.entries(groupMap)) {
           try {
             console.log(`Processing group ${group} with columns:`, colIndices);
             // For each concentration, collect all replicate values for this group
@@ -176,7 +196,8 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
             const validMeans = meanResponses.filter(v => typeof v === 'number' && !isNaN(v));
             if (validMeans.length < 3) {
               console.warn(`Group ${group} skipped: not enough valid data for fitting.`);
-              return;
+              completedCurves++;
+              continue;
             }
             const curve = fitCurve(concentrations, meanResponses.map(v => (typeof v === 'number' && !isNaN(v) ? v : 0)));
             curve.sampleName = group;
@@ -190,19 +211,27 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
             });
             
             curves.push(curve);
+            completedCurves++;
+            // Update progress
+            setProgress((completedCurves / totalCurves) * 100);
+            // Add small delay to show progress
+            await new Promise(resolve => setTimeout(resolve, 50));
           } catch (err) {
             console.error(`Error fitting group ${group}:`, err);
+            completedCurves++;
           }
-        });
+        }
         
         // Also fit individual replicates for the table
-        sampleNames.forEach((name, i) => {
+        for (let i = 0; i < sampleNames.length; i++) {
+          const name = sampleNames[i];
           try {
             const responses = data.map(d => d.responses[i]);
             const validResponses = responses.filter(v => typeof v === 'number' && !isNaN(v));
             if (validResponses.length < 3) {
               console.warn(`Individual replicate ${name} skipped: not enough valid data for fitting.`);
-              return;
+              completedCurves++;
+              continue;
             }
             const curve = fitCurve(concentrations, responses.map(v => (typeof v === 'number' && !isNaN(v) ? v : 0)));
             curve.sampleName = name;
@@ -214,26 +243,33 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
             });
             
             curves.push(curve);
+            completedCurves++;
+            
+            // Add small delay to show progress
+            await new Promise(resolve => setTimeout(resolve, 50));
           } catch (err) {
             console.error(`Error fitting individual replicate ${name}:`, err);
+            completedCurves++;
           }
-        });
+        }
       } else {
         // No custom groups - treat each column as individual sample
-        Object.entries(groupMap).forEach(([group, colIndices]) => {
+        for (const [group, colIndices] of Object.entries(groupMap)) {
           try {
             console.log(`Processing ${group} with columns:`, colIndices);
             const responses = data.map(d => d.responses[colIndices[0]]);
             const validResponses = responses.filter(v => typeof v === 'number' && !isNaN(v));
             if (validResponses.length < 3) {
               console.warn(`${group} skipped: not enough valid data for fitting.`);
-              return;
+              completedCurves++;
+              continue;
             }
             const curve = fitCurve(concentrations, responses.map(v => (typeof v === 'number' && !isNaN(v) ? v : 0)));
-            curve.sampleName = group;
+            // Use the actual sample name instead of the group name
+            curve.sampleName = sampleNames[colIndices[0]];
             curve.originalPoints = concentrations.map((x, i) => ({ x, y: responses[i] }));
             
-            console.log(`Created curve for ${group}:`, {
+            console.log(`Created curve for ${sampleNames[colIndices[0]]}:`, {
               sampleName: curve.sampleName,
               ec50: curve.ec50,
               fittedPointsCount: curve.fittedPoints?.length || 0,
@@ -241,11 +277,17 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
             });
             
             curves.push(curve);
+            completedCurves++;
+            
+            // Add small delay to show progress
+            await new Promise(resolve => setTimeout(resolve, 50));
           } catch (err) {
-            console.error(`Error fitting ${group}:`, err);
+            console.error(`Error fitting ${sampleNames[colIndices[0]]}:`, err);
+            completedCurves++;
           }
-        });
+        }
       }
+      
       console.log('Final curves:', curves);
       if (curves.length === 0) {
         alert('No valid curves could be fitted. Please check your data and replicate assignments.');
@@ -263,8 +305,9 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
 
   // Default color palette
   const defaultColors = [
-    '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe',
-    '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+    '#1f77b4', '#2ca02c', '#ff7f0e', '#d62728', '#9467bd', '#8c564b', // Blue, Light Green, Orange, Brown, Purple, Dark Green
+    '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#a6cee3', '#fb9a99',
+    '#fdbf6f', '#cab2d6', '#ffff99', '#b15928', '#fdb462', '#b3de69', '#fccde5', '#d9d9d9'
   ];
 
   return (
@@ -272,24 +315,42 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
       <h2 className="text-xl font-semibold mb-4">Curve Fitting</h2>
       
       <div className="space-y-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-          <h3 className="font-medium text-blue-900 mb-2">Four-Parameter Logistic Equation</h3>
-          <p className="text-blue-800 text-sm">
+        <div className="bg-[#8A0051]/10 border border-[#8A0051]/30 rounded-md p-4">
+          <h3 className="font-medium text-[#8A0051] mb-2">Four-Parameter Logistic Equation</h3>
+          <p className="text-[#8A0051]/80 text-sm">
             Y = Bottom + (Top - Bottom) / (1 + (2^(1/HillSlope) - 1) * (EC50/X)^HillSlope)
           </p>
-          <p className="text-blue-800 text-sm mt-2">
+          <p className="text-[#8A0051]/80 text-sm mt-2">
             All parameters (Top, Bottom, EC50, Hill Slope) are optimized during curve fitting
           </p>
         </div>
         
         {showFitButton && (
-          <button
-            onClick={handleFitCurves}
-            disabled={data.length === 0}
-            className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Fit Curves
-          </button>
+          <div>
+            <button
+              onClick={handleFitCurves}
+              disabled={data.length === 0 || isProcessing}
+              className="w-full px-4 py-2 bg-[#8A0051] text-white rounded-md hover:bg-[#6A003F] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isProcessing ? 'Calculating Results...' : 'Calculate Results'}
+            </button>
+            {isProcessing && (
+              <div className="mt-3">
+                <div className="mb-2 text-[#8A0051] text-sm font-medium">
+                  Calculating results... {Math.round(progress)}%
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-[#8A0051] h-2 rounded-full transition-all duration-300" 
+                    style={{ width: `${progress}%` }}
+                  ></div>
+                </div>
+                <div className="mt-1 text-gray-600 text-xs">
+                  Processing data...
+                </div>
+              </div>
+            )}
+          </div>
         )}
         
         {fittedCurves.length > 0 && (
@@ -317,7 +378,6 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
                         setCurveColors(newColors);
                       }}
                     />
-                    <span className="ml-2">{curveColors[index] || defaultColors[index % defaultColors.length]}</span>
                   </div>
                 </div>
               ))}
@@ -325,10 +385,13 @@ export default function CurveFitter({ data, onCurveFitting, curveColors, setCurv
             {/* Refresh Button */}
             <div className="mt-4 flex justify-end">
               <button
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                className="px-4 py-2 bg-[#8A0051] text-white rounded-md hover:bg-[#6A003F] transition-colors duration-200 flex items-center gap-2 shadow-sm"
                 onClick={onRefresh}
                 type="button"
               >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
                 Refresh Graph
               </button>
             </div>
