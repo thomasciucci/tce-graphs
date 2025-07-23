@@ -9,9 +9,10 @@ interface DataEditorProps {
   datasets?: Array<{ id?: string; name: string; assayType?: string }>;
   activeDatasetIndex?: number;
   onDatasetChange?: (index: number) => void;
+  hasReplicates?: boolean;
 }
 
-export default function DataEditor({ data, onDataUpdate, datasets, activeDatasetIndex, onDatasetChange }: DataEditorProps) {
+export default function DataEditor({ data, onDataUpdate, datasets, activeDatasetIndex, onDatasetChange, hasReplicates }: DataEditorProps) {
   const [editingData, setEditingData] = useState<DataPoint[]>(data);
   const [isEditing, setIsEditing] = useState(false);
   
@@ -28,9 +29,34 @@ export default function DataEditor({ data, onDataUpdate, datasets, activeDataset
     // Remove replicateGroups state and related useEffect
   };
 
+  const currentData = isEditing ? editingData : data;
+
+  // Helper: get current replicateGroups (assume all rows have the same)
+  const getCurrentReplicateGroups = () => {
+    if (currentData.length > 0 && currentData[0].replicateGroups && currentData[0].replicateGroups.length === currentData[0].sampleNames.length) {
+      return [...currentData[0].replicateGroups];
+    }
+    // Default: each column is its own group
+    return currentData[0]?.sampleNames?.map((_, i) => `Group ${i + 1}`) || [];
+  };
+
+  const [replicateGroups, setReplicateGroups] = useState<string[]>(getCurrentReplicateGroups());
+
+  // Keep replicateGroups in sync with data/sampleNames
+  useEffect(() => {
+    setReplicateGroups(getCurrentReplicateGroups());
+  }, [isEditing, currentData.length, currentData[0]?.sampleNames?.join(','), currentData[0]?.replicateGroups?.join(',')]);
+
+  // Handler for changing a replicate group assignment
+  const handleReplicateGroupChange = (colIdx: number, value: string) => {
+    const newGroups = [...replicateGroups];
+    newGroups[colIdx] = value;
+    setReplicateGroups(newGroups);
+  };
+
   const handleSave = () => {
-    // Save replicateGroups in all rows (for consistency)
-    const updated = editingData.map(row => ({ ...row, replicateGroups: [] }));
+    // Preserve replicateGroups in all rows
+    const updated = editingData.map(row => ({ ...row, replicateGroups: [...replicateGroups] }));
     onDataUpdate(updated);
     setIsEditing(false);
     setEditingData(updated);
@@ -66,7 +92,9 @@ export default function DataEditor({ data, onDataUpdate, datasets, activeDataset
     setEditingData(editingData.filter((_, i) => i !== index));
   };
 
-  const currentData = isEditing ? editingData : data;
+  const addGroup = () => {
+    setReplicateGroups([...replicateGroups, `Group ${replicateGroups.length + 1}`]);
+  };
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
@@ -168,6 +196,29 @@ export default function DataEditor({ data, onDataUpdate, datasets, activeDataset
                   </th>
                 )}
               </tr>
+              {hasReplicates && (
+                <tr className="bg-gray-100">
+                  <td className="border border-gray-300 px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                    Replicate Group
+                  </td>
+                  {currentData[0].sampleNames.map((name, colIdx) => (
+                    <td key={`repgroup_${colIdx}`} className="border border-gray-300 px-3 py-2 text-xs">
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={replicateGroups[colIdx] || ''}
+                          onChange={e => handleReplicateGroupChange(colIdx, e.target.value)}
+                          className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder={`Group ${colIdx + 1}`}
+                        />
+                      ) : (
+                        <span className="text-gray-700">{replicateGroups[colIdx]}</span>
+                      )}
+                    </td>
+                  ))}
+                  {isEditing && <td className="border border-gray-300 px-3 py-2"></td>}
+                </tr>
+              )}
             </thead>
             <tbody>
               {currentData.map((row, rowIndex) => (

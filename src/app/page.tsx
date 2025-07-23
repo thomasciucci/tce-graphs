@@ -124,8 +124,8 @@ export default function Home() {
   const handleDataUpload = (uploadedData: DataPoint[]) => {
     setPendingData(uploadedData);
     setPendingDatasets([]);
-    setShowReplicatePrompt(true);
-    setShowColumnEditor(false);
+    setShowColumnEditor(true); // Show unified configuration modal directly
+    setShowReplicatePrompt(false); // Skip replicate prompt
     setData([]);
     setDatasets([]);
     setFittedCurves([]);
@@ -484,7 +484,13 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-white">
+      {/* Simple App Title */}
+      <header className="w-full py-8 mb-8">
+        <h1 className="text-4xl md:text-5xl font-extrabold text-center" style={{ color: '#8A0051', letterSpacing: '0.05em' }}>
+          iDose Studio
+        </h1>
+      </header>
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">
           Dose Response Analyses
@@ -673,20 +679,25 @@ export default function Home() {
                            {Array.from(new Set((workflowOptions.groupAssignments || []).filter(Boolean))).map(group => (
                              <option key={group} value={group}>{group}</option>
                            ))}
-                           <option value="new">+ New Group</option>
+                           <option value="__add_new__">+ New Group</option>
                          </select>
-                         {workflowOptions.groupAssignments?.[index] === 'new' && (
-                           <input
-                             type="text"
-                             placeholder="Group name"
-                             className="border rounded px-2 py-1 flex-1"
-                             onBlur={e => {
-                               const newAssignments = [...(workflowOptions.groupAssignments || [])];
-                               newAssignments[index] = e.target.value;
-                               setWorkflowOptions(prev => ({ ...prev, groupAssignments: newAssignments }));
-                             }}
-                           />
-                         )}
+                         {/* When '+ New Group' is selected, assign next available group name */}
+                         {workflowOptions.groupAssignments?.[index] === '__add_new__' && (() => {
+                           // Find next available group name
+                           const existingGroups = (workflowOptions.groupAssignments || []).filter(Boolean).filter(g => g !== '__add_new__');
+                           let nextNumber = 1;
+                           while (existingGroups.includes(`Group ${nextNumber}`)) {
+                             nextNumber++;
+                           }
+                           const nextGroup = `Group ${nextNumber}`;
+                           // Immediately update assignment
+                           setTimeout(() => {
+                             const newAssignments = [...(workflowOptions.groupAssignments || [])];
+                             newAssignments[index] = nextGroup;
+                             setWorkflowOptions(prev => ({ ...prev, groupAssignments: newAssignments }));
+                           }, 0);
+                           return null;
+                         })()}
                        </div>
                      ))}
                    </div>
@@ -809,7 +820,8 @@ export default function Home() {
                     onDataUpdate={handleDataUpdate}
                     datasets={datasets}
                     activeDatasetIndex={activeDatasetIndex}
-                    onDatasetChange={(index) => handleSwitchDataset(index)}
+                    onDatasetChange={handleSwitchDataset}
+                    hasReplicates={workflowOptions.hasReplicates}
                   />
                 )}
               </div>
@@ -841,7 +853,8 @@ export default function Home() {
                   onColorChange={handleColorChange}
                   datasets={datasets}
                   activeDatasetIndex={activeDatasetIndex}
-                  onDatasetChange={(index) => handleSwitchDataset(index)}
+                  onDatasetChange={handleSwitchDataset}
+                  hasReplicates={workflowOptions.hasReplicates}
                 />
               )}
             </div>

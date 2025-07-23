@@ -33,10 +33,25 @@ export default function UnifiedColumnReplicateEditor({
     setColumnNames(prev => prev.map((n, i) => (i === idx ? value : n)));
   };
   const handleGroupAssignmentChange = (idx: number, group: string) => {
-    setGroupAssignments(prev => prev.map((g, i) => (i === idx ? group : g)));
-    if (!groupOptions.includes(group)) {
-      setGroupOptions(prev => [...prev, group]);
-      setGroupNames(prev => ({ ...prev, [group]: group }));
+    let assignedGroup = group;
+    if (group === '') {
+      // Find the next available group number
+      const existingNumbers = groupOptions
+        .map(opt => {
+          const match = opt.match(/^Group (\d+)$/);
+          return match ? parseInt(match[1], 10) : null;
+        })
+        .filter((n): n is number => n !== null);
+      let nextNumber = 1;
+      while (existingNumbers.includes(nextNumber)) {
+        nextNumber++;
+      }
+      assignedGroup = `Group ${nextNumber}`;
+    }
+    setGroupAssignments(prev => prev.map((g, i) => (i === idx ? assignedGroup : g)));
+    if (!groupOptions.includes(assignedGroup)) {
+      setGroupOptions(prev => [...prev, assignedGroup]);
+      setGroupNames(prev => ({ ...prev, [assignedGroup]: assignedGroup }));
     }
   };
   const handleGroupNameChange = (group: string, name: string) => {

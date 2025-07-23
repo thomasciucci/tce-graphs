@@ -1,6 +1,6 @@
 'use client';
 
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useState } from 'react';
 import { ComposedChart, Line, Scatter, XAxis, YAxis, ResponsiveContainer, Legend, ErrorBar } from 'recharts';
 import { DataPoint, FittedCurve } from '../types';
 
@@ -14,6 +14,7 @@ interface ResultsDisplayProps {
   datasets?: Array<{ id?: string; name: string; assayType?: string }>;
   activeDatasetIndex?: number;
   onDatasetChange?: (index: number) => void;
+  hasReplicates?: boolean;
 }
 
 const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({ 
@@ -25,7 +26,8 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
   onColorChange, 
   datasets, 
   activeDatasetIndex, 
-  onDatasetChange 
+  onDatasetChange, 
+  hasReplicates = true
 }, ref) => {
   console.log('ResultsDisplay received:', { data, fittedCurves, curveColors, datasetName, assayType });
   
@@ -59,8 +61,19 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
     data[0].replicateGroups.length === data[0].sampleNames.length &&
     new Set(data[0].replicateGroups).size < data[0].replicateGroups.length;
   
-  // Only show individual sample/column curves in the legend and chart
+  // UI toggles for showing groups/individuals
+  const [showGroups, setShowGroups] = useState(true);
+  const [showIndividuals, setShowIndividuals] = useState(true);
+
+  // Identify group curves and individual curves
+  const groupNames = Array.from(new Set((data[0]?.replicateGroups || []).filter(Boolean)));
+  const groupCurves = fittedCurves.filter(curve => groupNames.includes(curve.sampleName) && curve.meanPoints && curve.meanPoints.length >= 3);
   const individualCurves = fittedCurves.filter(curve => data[0]?.sampleNames.includes(curve.sampleName));
+
+  // Debug logs
+  console.log('ResultsDisplay: groupNames', groupNames);
+  console.log('ResultsDisplay: groupCurves', groupCurves.map(c => c.sampleName));
+  console.log('ResultsDisplay: individualCurves', individualCurves.map(c => c.sampleName));
   
   // Early return if no curves
   if (!fittedCurves || fittedCurves.length === 0) {
@@ -115,15 +128,19 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
   // Get all unique concentrations from fitted curves and original points
   const allConcentrationsSet = new Set<number>();
   
-  // Add all fitted points (these should be the main driver for smooth curves)
-  individualCurves.forEach(curve => {
-    curve.fittedPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
-  });
-  
-  // Add original points (for scatter dots)
-  individualCurves.forEach(curve => {
-    curve.originalPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
-  });
+  // Add all fitted points for all curves to be displayed
+  if (showGroups) {
+    groupCurves.forEach(curve => {
+      curve.fittedPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
+      curve.meanPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
+    });
+  }
+  if (showIndividuals) {
+    individualCurves.forEach(curve => {
+      curve.fittedPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
+      curve.originalPoints?.forEach(pt => allConcentrationsSet.add(pt.x));
+    });
+  }
   
   const allConcentrationsArray = Array.from(allConcentrationsSet).sort((a, b) => a - b);
   
@@ -132,28 +149,32 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
     const row: Record<string, number> = { concentration };
     
     // Add fitted curve data (for smooth lines)
-    individualCurves.forEach((curve) => {
-      const fittedPoint = curve.fittedPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
-      if (fittedPoint) {
-        row[`${curve.sampleName}_fitted`] = fittedPoint.y;
-      }
-    });
-    
-    // Add original data points (for scatter dots)
-    individualCurves.forEach((curve) => {
-      const originalPoint = curve.originalPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
-      if (originalPoint) {
-        row[`${curve.sampleName}_original`] = originalPoint.y;
-      }
-      
-      // Add SEM data if available (for error bars)
-      if (hasCustomGroups && curve.meanPoints) {
-        const meanPoint = curve.meanPoints.find(pt => Math.abs(pt.x - concentration) < 1e-8);
-        row[`${curve.sampleName}_sem`] = meanPoint && typeof meanPoint.sem === 'number' && !isNaN(meanPoint.sem) ? meanPoint.sem : 0;
-      }
-    });
-    
-    // Add row even if it only has fitted data (needed for continuous curves)
+    if (showGroups) {
+      groupCurves.forEach((curve) => {
+        const fittedPoint = curve.fittedPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
+        if (fittedPoint) {
+          row[`${curve.sampleName}_fitted`] = fittedPoint.y;
+        }
+        // Add group mean dots with SEM
+        const meanPoint = curve.meanPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
+        if (meanPoint) {
+          row[`${curve.sampleName}_mean`] = meanPoint.y;
+          row[`${curve.sampleName}_sem`] = meanPoint.sem;
+        }
+      });
+    }
+    if (showIndividuals) {
+      individualCurves.forEach((curve) => {
+        const fittedPoint = curve.fittedPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
+        if (fittedPoint) {
+          row[`${curve.sampleName}_fitted`] = fittedPoint.y;
+        }
+        const originalPoint = curve.originalPoints?.find(pt => Math.abs(pt.x - concentration) < 1e-8);
+        if (originalPoint) {
+          row[`${curve.sampleName}_original`] = originalPoint.y;
+        }
+      });
+    }
     chartData.push(row);
   });
   
@@ -217,6 +238,19 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
         </svg>
         Results
       </h2>
+      {/* Toggle controls for group/individual curves */}
+      <div className="mb-4 flex gap-6 items-center">
+        {hasReplicates && (
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={showGroups} onChange={e => setShowGroups(e.target.checked)} />
+            <span className="text-sm">Show Replicate Groups</span>
+          </label>
+        )}
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={showIndividuals} onChange={e => setShowIndividuals(e.target.checked)} />
+          <span className="text-sm">Show Individual Data</span>
+        </label>
+      </div>
       {hasZeroOrNegative && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center text-sm text-amber-800">
           <svg className="w-5 h-5 mr-2 text-amber-600" fill="currentColor" viewBox="0 0 20 20">
@@ -233,14 +267,14 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
         <div>
           <h3 className="text-lg font-medium text-gray-900 mb-3">Summary Statistics</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {individualCurves.map((curve, index) => (
+            {fittedCurves.map((curve, index) => (
               <div key={`${curve.sampleName || 'curve'}_${index}_summary`} className="bg-gradient-to-br from-gray-50 to-gray-100 p-4 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex items-center mb-3">
                   <div 
                     className="w-4 h-4 rounded-full mr-3 border-2 border-white shadow-sm"
                     style={{ backgroundColor: curveColors[index] || '#8884d8' }}
                   />
-                  <h4 className="font-semibold text-gray-900">{curve.sampleName}</h4>
+                  <h4 className="font-semibold text-gray-900">{curve.sampleName}{groupNames.includes(curve.sampleName) ? ' (Group)' : ''}</h4>
                 </div>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
@@ -454,45 +488,61 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                     borderRadius: '5px'
                   }}
                 />
-                {/* Fitted curves with PDF-safe colors */}
-                {individualCurves.map((curve, index) => (
+                {/* Fitted curves for groups */}
+                {showGroups && groupCurves.map((curve, index) => [
+                  <Line
+                    key={`${curve.sampleName || 'group'}_${index}_fitted`}
+                    type="monotone"
+                    dataKey={`${curve.sampleName}_fitted`}
+                    stroke={curveColors[index % curveColors.length] || '#000000'}
+                    strokeWidth={3}
+                    dot={false}
+                    connectNulls={true}
+                    legendType="line"
+                    name={`${curve.sampleName} (Group)`}
+                  />,
+                  <Scatter
+                    key={`${curve.sampleName || 'group'}_${index}_meanDots`}
+                    name={`${curve.sampleName} Mean ± SEM`}
+                    dataKey={`${curve.sampleName}_mean`}
+                    fill={curveColors[index % curveColors.length] || '#000000'}
+                    shape="circle"
+                    legendType="circle"
+                    r={7}
+                  >
+                    <ErrorBar
+                      key={`errorbar-${curve.sampleName || 'group'}-${index}`}
+                      dataKey={`${curve.sampleName}_sem`}
+                      width={6}
+                      stroke={curveColors[index % curveColors.length] || '#000000'}
+                      direction="y"
+                      strokeWidth={2}
+                    />
+                  </Scatter>
+                ])}
+                {/* Fitted curves for individuals */}
+                {showIndividuals && individualCurves.map((curve, index) => [
                   <Line
                     key={`${curve.sampleName || 'curve'}_${index}_fitted`}
                     type="monotone"
                     dataKey={`${curve.sampleName}_fitted`}
-                    stroke={curveColors[index] || '#000000'}
+                    stroke={curveColors[index % curveColors.length] || '#000000'}
                     strokeWidth={3}
                     dot={false}
                     connectNulls={true}
                     legendType="line"
                     name={curve.sampleName}
-                  />
-                ))}
-                {/* Original data points with PDF-safe colors */}
-                {individualCurves.map((curve, index) => (
+                  />,
                   <Scatter
                     key={`${curve.sampleName || 'curve'}_${index}_original`}
                     name={curve.sampleName}
                     dataKey={`${curve.sampleName}_original`}
-                    fill={curveColors[index] || '#000000'}
+                    fill={curveColors[index % curveColors.length] || '#000000'}
                     shape="square"
                     legendType="none"
                     r={5}
-                  >
-                    {/* Add error bars if we have custom groups (replicates) and valid data */}
-                    {hasCustomGroups && curve.meanPoints && 
-                      validChartData.some(row => Number.isFinite(row[`${curve.sampleName}_sem`])) && 
-                      validChartData.every(row => Number.isFinite(row[`${curve.sampleName}_sem`])) && (
-                      <ErrorBar
-                        dataKey={`${curve.sampleName}_sem`}
-                        width={5}
-                        stroke={curveColors[index] || '#000000'}
-                        direction="y"
-                        strokeWidth={2}
-                      />
-                    )}
-                  </Scatter>
-                ))}
+                  />
+                ])}
               </ComposedChart>
             </ResponsiveContainer>
           </div>

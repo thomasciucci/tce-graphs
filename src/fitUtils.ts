@@ -108,6 +108,9 @@ export function fitCurvesForData(data: DataPoint[]): FittedCurve[] {
       groupMap[name] = [i];
     });
   }
+  // Debug: print group names and sampleNames
+  console.log('fitCurvesForData: groupNames', Object.keys(groupMap));
+  // --- Ensure group curves are always generated and named correctly ---
   if (hasCustomGroups) {
     // Process custom groups (replicates)
     Object.entries(groupMap).forEach(([group, colIndices]) => {
@@ -126,11 +129,10 @@ export function fitCurvesForData(data: DataPoint[]): FittedCurve[] {
       const validMeans = meanResponses.filter(v => typeof v === 'number' && !isNaN(v));
       if (validMeans.length < 3) return;
       const curve = fitCurve(concentrations, meanResponses.map(v => (typeof v === 'number' && !isNaN(v) ? v : 0)));
-      curve.sampleName = group;
+      curve.sampleName = group; // Ensure sampleName matches group name exactly
       curve.meanPoints = concentrations.map((x, i) => ({ x, y: meanResponses[i], sem: sems[i] }));
       curves.push(curve);
     });
-    
     // Also process individual replicates for display
     sampleNames.forEach((name, i) => {
       const responses = data.map(d => d.responses[i]);
@@ -154,5 +156,7 @@ export function fitCurvesForData(data: DataPoint[]): FittedCurve[] {
       curves.push(curve);
     });
   }
+  // Debug: print all curve sampleNames
+  console.log('fitCurvesForData: all curve sampleNames', curves.map(c => c.sampleName));
   return curves;
 } 
