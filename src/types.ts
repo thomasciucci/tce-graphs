@@ -18,6 +18,8 @@ export interface Dataset {
 export interface FittedCurve {
   sampleName: string;
   ec50: number;
+  ec10?: number;
+  ec90?: number;
   hillSlope: number;
   top: number;
   bottom: number;

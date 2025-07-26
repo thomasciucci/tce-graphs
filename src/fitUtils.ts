@@ -17,6 +17,19 @@ const fourParameterLogistic = (x: number, top: number, bottom: number, ec50: num
   return bottom + (numerator / denominator);
 };
 
+// Calculate EC10 and EC90 from fitted curve parameters
+const calculateEC10 = (top: number, bottom: number, ec50: number, hillSlope: number): number => {
+  const response10 = bottom + 0.1 * (top - bottom);
+  const ratio = (top - response10) / (response10 - bottom);
+  return ec50 * Math.pow(ratio, 1 / hillSlope);
+};
+
+const calculateEC90 = (top: number, bottom: number, ec50: number, hillSlope: number): number => {
+  const response90 = bottom + 0.9 * (top - bottom);
+  const ratio = (top - response90) / (response90 - bottom);
+  return ec50 * Math.pow(ratio, 1 / hillSlope);
+};
+
 // Calculate R-squared
 const calculateRSquared = (actual: number[], predicted: number[]): number => {
   const mean = actual.reduce((sum, val) => sum + val, 0) / actual.length;
@@ -75,9 +88,16 @@ const fitCurve = (concentrations: number[], responses: number[]): FittedCurve =>
     });
   }
   const originalPoints = X.map((x, i) => ({ x, y: Y[i] }));
+  
+  // Calculate EC10 and EC90
+  const ec10 = calculateEC10(bestTop, bestBottom, bestEc50, bestHillSlope);
+  const ec90 = calculateEC90(bestTop, bestBottom, bestEc50, bestHillSlope);
+  
   return {
     sampleName: 'Sample',
     ec50: bestEc50,
+    ec10: ec10,
+    ec90: ec90,
     hillSlope: bestHillSlope,
     top: bestTop,
     bottom: bestBottom,

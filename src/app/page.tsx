@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import FileUpload from '../components/FileUpload';
 import DataEditor from '../components/DataEditor';
 import CurveFitter from '../components/CurveFitter';
 import ResultsDisplay from '../components/ResultsDisplay';
 import { exportToPDF, captureChartImage } from '../utils/pdfExport';
+import PrismExportModal from '../components/PrismExportModal';
 
 import { DataPoint, FittedCurve, Dataset } from '../types';
 import { fitCurvesForData } from '../fitUtils';
@@ -30,8 +31,10 @@ export default function Home() {
   const [activeDatasetIndex, setActiveDatasetIndex] = useState(0);
   const [isFittingAll, setIsFittingAll] = useState(false);
   const [curveColorsByDataset, setCurveColorsByDataset] = useState<Record<string, string[]>>({});
+  const [curveVisibilityByDataset, setCurveVisibilityByDataset] = useState<Record<string, boolean[]>>({});
   const [fitAllProgress, setFitAllProgress] = useState(0);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [showPrismExportModal, setShowPrismExportModal] = useState(false);
   
   // Add state to track original data for PDF export
   const [originalDataByDataset, setOriginalDataByDataset] = useState<Record<string, DataPoint[]>>({});
@@ -52,14 +55,21 @@ export default function Home() {
   // Add ref for chart capture
   const chartRef = useRef<HTMLDivElement>(null);
 
-  // Current data and dataset tracking - use edited data for display
-  const currentDatasetId = datasets.length > 0 ? datasets[activeDatasetIndex]?.id : undefined;
-  const currentData = datasets.length > 0 
-    ? (currentDatasetId ? editedDataByDataset[currentDatasetId] || datasets[activeDatasetIndex]?.data || [] : [])
-    : data;
+  // Current data and dataset tracking - use edited data for display (memoized)
+  const currentDatasetId = useMemo(() => 
+    datasets.length > 0 ? datasets[activeDatasetIndex]?.id : undefined, 
+    [datasets, activeDatasetIndex]
+  );
   
-  // Helper function to get display column names for multiple tables
-  const getDisplayColumnNames = () => {
+  const currentData = useMemo(() => 
+    datasets.length > 0 
+      ? (currentDatasetId ? editedDataByDataset[currentDatasetId] || datasets[activeDatasetIndex]?.data || [] : [])
+      : data,
+    [datasets, activeDatasetIndex, currentDatasetId, editedDataByDataset, data]
+  );
+  
+  // Helper function to get display column names for multiple tables (memoized)
+  const getDisplayColumnNames = useCallback(() => {
     if (pendingData) {
       return pendingData[0]?.sampleNames || [];
     }
@@ -73,18 +83,8 @@ export default function Home() {
       // When not merging, show current table's columns
       return pendingDatasets[currentTableIndex]?.data[0]?.sampleNames || [];
     }
-  };
+  }, [pendingData, workflowOptions.mergeTables, pendingDatasets, currentTableIndex]);
   
-  // Debug logging
-  console.log('Current state:', {
-    dataLength: data.length,
-    datasetsLength: datasets.length,
-    activeDatasetIndex,
-    currentDataLength: currentData.length,
-    pendingDataLength: pendingData?.length || 0,
-    showReplicatePrompt,
-    showColumnEditor
-  });
 
   // Update fitted curves when switching datasets
   useEffect(() => {
@@ -121,7 +121,7 @@ export default function Home() {
   }, [datasets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Optimized workflow state
-  const handleDataUpload = (uploadedData: DataPoint[]) => {
+  const handleDataUpload = useCallback((uploadedData: DataPoint[]) => {
     setPendingData(uploadedData);
     setPendingDatasets([]);
     setShowColumnEditor(true); // Show unified configuration modal directly
@@ -129,10 +129,10 @@ export default function Home() {
     setData([]);
     setDatasets([]);
     setFittedCurves([]);
-  };
+  }, []);
 
   // Multiple tables import - go directly to comprehensive configuration
-  const handleMultipleDatasetsUpload = (uploadedDatasets: Dataset[]) => {
+  const handleMultipleDatasetsUpload = useCallback((uploadedDatasets: Dataset[]) => {
     setPendingData(null);
     setPendingDatasets(uploadedDatasets);
     setShowColumnEditor(true);
@@ -140,7 +140,7 @@ export default function Home() {
     setData([]);
     setDatasets([]);
     setFittedCurves([]);
-  };
+  }, []);
 
   // Single table: replicate prompt (keep this simple for single tables)
   const handleReplicatePrompt = (hasReps: boolean) => {
@@ -153,7 +153,6 @@ export default function Home() {
 
   // Column editor save handler
   const handleColumnEditorSave = (columnNames: string[], groupAssignments: string[]) => {
-    console.log('Column editor save called:', { columnNames, groupAssignments, pendingData: !!pendingData, pendingDatasetsLength: pendingDatasets.length });
     
     if (pendingData) {
       // Single table
@@ -162,7 +161,6 @@ export default function Home() {
         sampleNames: columnNames,
         replicateGroups: workflowOptions.hasReplicates ? groupAssignments : undefined,
       }));
-      console.log('Setting single table data:', updatedData.length, 'rows');
       setData(updatedData);
       setShowColumnEditor(false);
       setPendingData(null);
@@ -207,7 +205,6 @@ export default function Home() {
           allData.push(mergedRow);
         });
         
-        console.log('Merged data:', allData.length, 'rows with', allData[0]?.responses.length, 'responses each');
         setData(allData);
         setShowColumnEditor(false);
         setPendingDatasets([]);
@@ -302,6 +299,11 @@ export default function Home() {
           if (prev[datasetId]) return prev;
           return { ...prev, [datasetId]: curves.map((_, idx) => defaultColors[idx % defaultColors.length]) };
         });
+        // Initialize visibility for this dataset if not already set
+        setCurveVisibilityByDataset(prev => {
+          if (prev[datasetId]) return prev;
+          return { ...prev, [datasetId]: curves.map(() => true) };
+        });
       }
     } else {
       setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
@@ -377,33 +379,23 @@ export default function Home() {
     
     try {
       setIsExportingPDF(true);
-      console.log('Starting PDF export...');
       
       // Capture chart image if available
       let chartImage = '';
       if (chartRef.current) {
-        console.log('Chart ref found, attempting to capture...');
-        
         try {
           // Give the chart extra time to render fully
-          console.log('Waiting for chart to render...');
           await new Promise(resolve => setTimeout(resolve, 2000));
           
           // Call the improved capture function
           const capturedImage = await captureChartImage();
-          console.log('Chart image captured:', capturedImage ? 'Success' : 'Failed');
           
           if (capturedImage) {
             chartImage = capturedImage;
-            console.log('Image data length:', chartImage.length);
-          } else {
-            console.log('Chart capture returned null');
           }
         } catch (captureError) {
           console.error('Error during chart capture:', captureError);
         }
-      } else {
-        console.log('Chart ref not found - make sure ResultsDisplay is rendered');
       }
 
       const exportOptions = {
@@ -412,18 +404,15 @@ export default function Home() {
         originalDataByDataset: datasets.length > 0 ? originalDataByDataset : { 'single': originalDataByDataset['single'] || data },
         editedDataByDataset: datasets.length > 0 ? editedDataByDataset : { 'single': editedDataByDataset['single'] || data },
         curveColorsByDataset: datasets.length > 0 ? curveColorsByDataset : { 'single': curveColors },
+        curveVisibilityByDataset: datasets.length > 0 ? curveVisibilityByDataset : { 'single': curveVisibilityByDataset['single'] || [] },
         assayType: datasets[activeDatasetIndex]?.assayType,
         chartImage,
-        // Add callback to switch datasets during PDF generation
-        onDatasetSwitch: datasets.length > 1 ? async (datasetIndex: number) => {
-          console.log(`PDF Export: Switching to dataset ${datasetIndex}`);
-          await handleSwitchDataset(datasetIndex);
-        } : undefined
+        // Add callbacks for PDF generation
+        onDatasetSwitch: datasets.length > 1 ? handleSwitchDataset : undefined,
+        onCurveVisibilityChange: handleCurveVisibilityChangeForPDF
       };
       
-      console.log('Starting PDF export with options:', exportOptions);
       await exportToPDF(exportOptions);
-      console.log('PDF export completed successfully');
     } catch (error) {
       console.error('PDF export failed:', error);
       alert('Failed to export PDF. Please try again.');
@@ -432,14 +421,16 @@ export default function Home() {
     }
   };
 
-  // Check if we have results to export
-  const hasResults = datasets.length > 0 
-    ? Object.keys(fittedCurvesByDataset).length > 0
-    : fittedCurves.length > 0;
+  // Check if we have results to export (memoized)
+  const hasResults = useMemo(() => 
+    datasets.length > 0 
+      ? Object.keys(fittedCurvesByDataset).length > 0
+      : fittedCurves.length > 0,
+    [datasets.length, fittedCurvesByDataset, fittedCurves.length]
+  );
 
   // Handler for switching datasets
   const handleSwitchDataset = async (index: number) => {
-    console.log(`Switching to dataset ${index}: ${datasets[index]?.name}`);
     setActiveDatasetIndex(index);
     
     // Restore fit for this dataset if available
@@ -481,6 +472,35 @@ export default function Home() {
         return newColors;
       });
     }
+  };
+
+  // Handle curve visibility change for current dataset
+  const handleCurveVisibilityChange = (idx: number, visible: boolean) => {
+    if (datasets.length > 0) {
+      const datasetId = datasets[activeDatasetIndex]?.id;
+      if (datasetId) {
+        setCurveVisibilityByDataset(prev => {
+          const newVisibility = prev[datasetId] ? [...prev[datasetId]] : [];
+          newVisibility[idx] = visible;
+          return { ...prev, [datasetId]: newVisibility };
+        });
+      }
+    }
+  };
+
+  // Handle curve visibility change for PDF export (with dataset ID)
+  const handleCurveVisibilityChangeForPDF = async (datasetId: string, curveIndex: number, visible: boolean) => {
+    setCurveVisibilityByDataset(prev => {
+      const newVisibility = prev[datasetId] ? [...prev[datasetId]] : [];
+      newVisibility[curveIndex] = visible;
+      return { ...prev, [datasetId]: newVisibility };
+    });
+    
+    // Force re-render
+    setRefreshKey(prev => prev + 1);
+    
+    // Wait for state update
+    await new Promise(resolve => setTimeout(resolve, 100));
   };
 
   return (
@@ -851,6 +871,8 @@ export default function Home() {
                         : ''
                   }
                   onColorChange={handleColorChange}
+                  onCurveVisibilityChange={handleCurveVisibilityChange}
+                  curveVisibility={currentDatasetId ? curveVisibilityByDataset[currentDatasetId] : undefined}
                   datasets={datasets}
                   activeDatasetIndex={activeDatasetIndex}
                   onDatasetChange={handleSwitchDataset}
@@ -859,23 +881,23 @@ export default function Home() {
               )}
             </div>
 
-            {/* Export PDF button */}
+            {/* Export buttons */}
             {hasResults && (
               <div className="bg-white p-6 rounded-lg shadow mb-6">
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Export Results</h3>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <button
                       onClick={handleExportPDF}
                       disabled={isExportingPDF}
-                      className={`px-8 py-4 text-white rounded-lg text-lg font-medium transition-colors shadow-lg hover:shadow-xl ${
+                      className={`px-6 py-3 text-white rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl ${
                         isExportingPDF 
                           ? 'bg-gray-400 cursor-not-allowed' 
                           : 'bg-[#8A0051] hover:bg-[#6A003F]'
                       }`}
                     >
                       {isExportingPDF ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-center gap-2">
                           <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
@@ -883,18 +905,46 @@ export default function Home() {
                           Generating PDF...
                         </div>
                       ) : (
-                        'Export to PDF'
+                        <div className="flex items-center justify-center gap-2">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Export to PDF
+                        </div>
                       )}
                     </button>
+                    
+                    <button
+                      onClick={() => setShowPrismExportModal(true)}
+                      className="px-6 py-3 bg-[#8A0051] text-white rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl hover:bg-[#6A003F]"
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        Export to Prism
+                      </div>
+                    </button>
                   </div>
-                  <p className="mt-2 text-sm text-gray-600">
-                    Generate a comprehensive report with raw data, edited data, and fitted curve results
-                  </p>
                 </div>
               </div>
             )}
           </div>
         )}
+
+        {/* Prism Export Modal */}
+        <PrismExportModal
+          isOpen={showPrismExportModal}
+          onClose={() => setShowPrismExportModal(false)}
+          datasets={datasets}
+          fittedCurves={fittedCurves}
+          fittedCurvesByDataset={fittedCurvesByDataset}
+          originalDataByDataset={originalDataByDataset}
+          editedDataByDataset={editedDataByDataset}
+          curveColorsByDataset={curveColorsByDataset}
+          currentData={currentData}
+          hasReplicates={workflowOptions.hasReplicates}
+        />
       </div>
     </div>
   );

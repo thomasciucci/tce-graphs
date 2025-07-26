@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { DataPoint } from '../types';
 
 interface DataEditorProps {
@@ -12,7 +12,7 @@ interface DataEditorProps {
   hasReplicates?: boolean;
 }
 
-export default function DataEditor({ data, onDataUpdate, datasets, activeDatasetIndex, onDatasetChange, hasReplicates }: DataEditorProps) {
+const DataEditor = React.memo(function DataEditor({ data, onDataUpdate, datasets, activeDatasetIndex, onDatasetChange, hasReplicates }: DataEditorProps) {
   const [editingData, setEditingData] = useState<DataPoint[]>(data);
   const [isEditing, setIsEditing] = useState(false);
   
@@ -23,78 +23,78 @@ export default function DataEditor({ data, onDataUpdate, datasets, activeDataset
     setIsEditing(false);
   }, [data]);
 
-  const handleEdit = () => {
+  const handleEdit = useCallback(() => {
     setIsEditing(true);
     setEditingData([...data]);
-    // Remove replicateGroups state and related useEffect
-  };
+  }, [data]);
 
   const currentData = isEditing ? editingData : data;
 
-  // Helper: get current replicateGroups (assume all rows have the same)
-  const getCurrentReplicateGroups = () => {
+  // Helper: get current replicateGroups (memoized)
+  const getCurrentReplicateGroups = useMemo(() => {
     if (currentData.length > 0 && currentData[0].replicateGroups && currentData[0].replicateGroups.length === currentData[0].sampleNames.length) {
       return [...currentData[0].replicateGroups];
     }
     // Default: each column is its own group
     return currentData[0]?.sampleNames?.map((_, i) => `Group ${i + 1}`) || [];
-  };
+  }, [currentData]);
 
-  const [replicateGroups, setReplicateGroups] = useState<string[]>(getCurrentReplicateGroups());
+  const [replicateGroups, setReplicateGroups] = useState<string[]>(getCurrentReplicateGroups);
 
   // Keep replicateGroups in sync with data/sampleNames
   useEffect(() => {
-    setReplicateGroups(getCurrentReplicateGroups());
-  }, [isEditing, currentData.length, currentData[0]?.sampleNames?.join(','), currentData[0]?.replicateGroups?.join(',')]);
+    setReplicateGroups(getCurrentReplicateGroups);
+  }, [getCurrentReplicateGroups]);
 
   // Handler for changing a replicate group assignment
-  const handleReplicateGroupChange = (colIdx: number, value: string) => {
-    const newGroups = [...replicateGroups];
-    newGroups[colIdx] = value;
-    setReplicateGroups(newGroups);
-  };
+  const handleReplicateGroupChange = useCallback((colIdx: number, value: string) => {
+    setReplicateGroups(prev => {
+      const newGroups = [...prev];
+      newGroups[colIdx] = value;
+      return newGroups;
+    });
+  }, []);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     // Preserve replicateGroups in all rows
     const updated = editingData.map(row => ({ ...row, replicateGroups: [...replicateGroups] }));
     onDataUpdate(updated);
     setIsEditing(false);
     setEditingData(updated);
-  };
+  }, [editingData, replicateGroups, onDataUpdate]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     setEditingData([...data]);
     setIsEditing(false);
-  };
+  }, [data]);
 
-  const updateValue = (rowIndex: number, colIndex: number, value: string) => {
-    const newData = [...editingData];
-    if (colIndex === 0) {
-      // Update concentration
-      newData[rowIndex].concentration = parseFloat(value) || 0;
-    } else {
-      // Update response value
-      newData[rowIndex].responses[colIndex - 1] = parseFloat(value) || 0;
-    }
-    setEditingData(newData);
-  };
+  const updateValue = useCallback((rowIndex: number, colIndex: number, value: string) => {
+    setEditingData(prev => {
+      const newData = [...prev];
+      if (colIndex === 0) {
+        // Update concentration
+        newData[rowIndex].concentration = parseFloat(value) || 0;
+      } else {
+        // Update response value
+        newData[rowIndex].responses[colIndex - 1] = parseFloat(value) || 0;
+      }
+      return newData;
+    });
+  }, []);
 
-  const addRow = () => {
+  const addRow = useCallback(() => {
     const newRow: DataPoint = {
       concentration: 0,
       responses: new Array(data[0]?.responses.length || 0).fill(0),
       sampleNames: data[0]?.sampleNames || []
     };
-    setEditingData([...editingData, newRow]);
-  };
+    setEditingData(prev => [...prev, newRow]);
+  }, [data]);
 
-  const removeRow = (index: number) => {
-    setEditingData(editingData.filter((_, i) => i !== index));
-  };
+  const removeRow = useCallback((index: number) => {
+    setEditingData(prev => prev.filter((_, i) => i !== index));
+  }, []);
 
-  const addGroup = () => {
-    setReplicateGroups([...replicateGroups, `Group ${replicateGroups.length + 1}`]);
-  };
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
@@ -286,4 +286,6 @@ export default function DataEditor({ data, onDataUpdate, datasets, activeDataset
       )}
     </div>
   );
-} 
+});
+
+export default DataEditor; 

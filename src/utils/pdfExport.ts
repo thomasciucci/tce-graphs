@@ -13,6 +13,7 @@ interface PDFExportOptions {
   originalDataByDataset: Record<string, DataPoint[]>;
   editedDataByDataset: Record<string, DataPoint[]>;
   curveColorsByDataset: Record<string, string[]>;
+  curveVisibilityByDataset?: Record<string, boolean[]>;
   assayType?: string;
   chartImage?: string;
 }
@@ -20,21 +21,25 @@ interface PDFExportOptions {
 // Add interface for dataset switching callback
 interface PDFExportOptionsWithCallback extends PDFExportOptions {
   onDatasetSwitch?: (datasetIndex: number) => Promise<void>;
+  onCurveVisibilityChange?: (datasetId: string, curveIndex: number, visible: boolean) => Promise<void>;
 }
 
 export async function exportToPDF(options: PDFExportOptionsWithCallback): Promise<void> {
-  const {
-    datasets,
-    fittedCurvesByDataset,
-    originalDataByDataset,
-    editedDataByDataset,
-    curveColorsByDataset,
-    assayType,
-    onDatasetSwitch
-  } = options;
+  try {
+    const {
+      datasets,
+      fittedCurvesByDataset,
+      originalDataByDataset,
+      editedDataByDataset,
+      curveColorsByDataset,
+      curveVisibilityByDataset,
+      assayType,
+      onDatasetSwitch,
+      onCurveVisibilityChange
+    } = options;
 
-  const pdf = new jsPDF();
-  let currentPage = 1;
+    const pdf = new jsPDF();
+    let currentPage = 1;
 
   // Page 1: Summary and Assay Parameters
   addSummaryPage(pdf, datasets, assayType);
@@ -52,6 +57,7 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
 
     // Switch to this dataset if callback provided
     let datasetChartImage = '';
+    let selectedCurvesChartImage = '';
     if (onDatasetSwitch) {
       console.log(`Switching to dataset ${i}: ${dataset.name}`);
       await onDatasetSwitch(i);
@@ -59,24 +65,74 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
       // Wait for UI to update
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // Capture chart for this specific dataset
-      console.log(`Capturing chart for dataset: ${dataset.name}`);
-      const capturedImage = await captureChartImage();
-      if (capturedImage) {
-        datasetChartImage = capturedImage;
-        console.log(`Chart captured for ${dataset.name}, length: ${capturedImage.length}`);
+      // First, ensure all curves are visible for the "All Curves" capture
+      const curveVisibility = curveVisibilityByDataset?.[dataset.id];
+      const hasHiddenCurves = curveVisibility && curveVisibility.some(visible => !visible);
+      
+      if (hasHiddenCurves && onCurveVisibilityChange) {
+        console.log(`Preparing to capture both chart states for dataset: ${dataset.name}`);
+        
+        // Temporarily show all curves for "All Curves" capture
+        const curves = fittedCurvesByDataset[dataset.id] || [];
+        for (let i = 0; i < curves.length; i++) {
+          await onCurveVisibilityChange(dataset.id, i, true);
+        }
+        
+        // Wait for UI to update
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Capture chart with all curves visible
+        console.log(`Capturing "All Curves" chart for dataset: ${dataset.name}`);
+        const allCurvesImage = await captureChartImage();
+        if (allCurvesImage) {
+          datasetChartImage = allCurvesImage;
+          console.log(`"All Curves" chart captured for ${dataset.name}`);
+        } else {
+          console.log(`Failed to capture "All Curves" chart for ${dataset.name}`);
+        }
+        
+        // Now hide curves that should be hidden for "Selected Curves" capture
+        for (let i = 0; i < curves.length; i++) {
+          await onCurveVisibilityChange(dataset.id, i, curveVisibility[i]);
+        }
+        
+        // Wait for UI to update
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Capture the filtered chart
+        console.log(`Capturing "Selected Curves" chart for dataset: ${dataset.name}`);
+        const filteredImage = await captureChartImage();
+        if (filteredImage) {
+          selectedCurvesChartImage = filteredImage;
+          console.log(`"Selected Curves" chart captured for ${dataset.name}`);
+        } else {
+          selectedCurvesChartImage = '';
+        }
       } else {
-        console.log(`Failed to capture chart for ${dataset.name}`);
+        // No hidden curves, just capture the current state
+        console.log(`Capturing chart for dataset: ${dataset.name}`);
+        const capturedImage = await captureChartImage();
+        if (capturedImage) {
+          datasetChartImage = capturedImage;
+          console.log(`Chart captured for ${dataset.name}, length: ${capturedImage.length}`);
+        } else {
+          console.log(`Failed to capture chart for ${dataset.name}`);
+        }
+        selectedCurvesChartImage = capturedImage || '';
       }
     }
 
     // Single page with all data for this dataset
-    await addDatasetPage(pdf, dataset, originalData, editedData, fittedCurves, curveColors, currentPage, datasetChartImage);
+    await addDatasetPage(pdf, dataset, originalData, editedData, fittedCurves, curveColors, currentPage, datasetChartImage, selectedCurvesChartImage, curveVisibilityByDataset);
     currentPage++;
   }
 
-  // Save the PDF
-  pdf.save(`dose-response-analysis-${new Date().toISOString().split('T')[0]}.pdf`);
+    // Save the PDF
+    pdf.save(`dose-response-analysis-${new Date().toISOString().split('T')[0]}.pdf`);
+  } catch (error) {
+    console.error('PDF export failed:', error);
+    throw error;
+  }
 }
 
 function addSummaryPage(pdf: jsPDF, datasets: Dataset[], assayType?: string): void {
@@ -152,7 +208,9 @@ async function addDatasetPage(
   fittedCurves: FittedCurve[], 
   curveColors: string[], 
   pageNumber: number, 
-  chartImage?: string
+  chartImage?: string,
+  selectedCurvesChartImage?: string,
+  curveVisibilityByDataset?: Record<string, boolean[]>
 ): Promise<void> {
   pdf.addPage();
   
@@ -314,7 +372,9 @@ async function addDatasetPage(
 
     const summaryData = fittedCurves.map((curve) => [
       curve.sampleName,
+      curve.ec10 ? curve.ec10.toExponential(2) : 'N/A',
       curve.ec50.toExponential(2),
+      curve.ec90 ? curve.ec90.toExponential(2) : 'N/A',
       curve.top.toFixed(1),
       curve.bottom.toFixed(1),
       curve.rSquared.toFixed(3)
@@ -322,7 +382,7 @@ async function addDatasetPage(
 
     autoTable(pdf, {
       startY: currentY,
-      head: [['Sample', 'EC50 [nM]', 'Top (%)', 'Bottom (%)', 'R²']],
+      head: [['Sample', 'EC10 [nM]', 'EC50 [nM]', 'EC90 [nM]', 'Top (%)', 'Bottom (%)', 'R²']],
       body: summaryData,
       theme: 'grid',
       headStyles: {
@@ -342,58 +402,58 @@ async function addDatasetPage(
     currentY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   }
 
-  // Section 4: Fitted Values Table (compact)
-  if (fittedCurves.length > 0) {
-    pdf.setFontSize(10);
-    pdf.setTextColor(138, 0, 81);
-    pdf.text('Fitted Values', margin, currentY);
-    currentY += 8;
+  // Section 4: Fitted Values Table removed as requested
 
-    const fittedData = fittedCurves.map((curve) => [
-      curve.sampleName,
-      curve.ec50.toExponential(2),
-      curve.hillSlope.toFixed(2),
-      curve.top.toFixed(1),
-      curve.bottom.toFixed(1),
-      curve.rSquared.toFixed(3)
-    ]);
-
-    autoTable(pdf, {
-      startY: currentY,
-      head: [['Sample', 'EC50 [nM]', 'Hill Slope', 'Top (%)', 'Bottom (%)', 'R²']],
-      body: fittedData,
-      theme: 'grid',
-      headStyles: {
-        fillColor: [138, 0, 81],
-        textColor: 255,
-        fontStyle: 'bold',
-        fontSize: 6
-      },
-      styles: {
-        fontSize: 5,
-        cellPadding: 2
-      },
-      margin: { top: 0, right: margin, bottom: 0, left: margin },
-      tableWidth: contentWidth
-    });
-
-    currentY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
-  }
-
-  // Section 5: Chart image (if available)
-  if (chartImage) {
+  // Section 5: Chart images (if available)
+  if (chartImage && chartImage.trim() !== '') {
     try {
-      console.log('Attempting to add chart image to PDF, currentY:', currentY);
-      console.log('Chart image data URL starts with:', chartImage.substring(0, 50));
-      console.log('Chart image data URL length:', chartImage.length);
+      console.log('Attempting to add chart images to PDF, currentY:', currentY);
       
       // Check if there's enough space on the page
       if (currentY + 200 < 250) {
         // Add to current page
-        const imgWidth = Math.min(160, contentWidth);
-        const imgHeight = (imgWidth * 0.7);
+        const imgWidth = Math.min(180, contentWidth);
+        const imgHeight = (imgWidth * 0.6); // Better aspect ratio for charts
+        
+        // Add title for chart
+        pdf.setFontSize(12);
+        pdf.setTextColor(138, 0, 81);
+        pdf.text('All Curves', margin, currentY);
+        currentY += 8;
+        
         pdf.addImage(chartImage, 'PNG', margin, currentY, imgWidth, imgHeight);
+        
+                   // Add Y-axis title directly as text overlay
+           const yAxisLabel = getYAxisLabel(dataset);
+           if (yAxisLabel) {
+             pdf.setFontSize(10);
+             pdf.setFont('helvetica', 'bold');
+             pdf.setTextColor(0, 0, 0);
+          
+          // Position Y-axis title closer to the chart
+          const yAxisTitleX = margin + 8;
+          const yAxisTitleY = currentY + (imgHeight / 2);
+          
+          // Rotate text -90 degrees and position it
+          pdf.text(yAxisLabel, yAxisTitleX, yAxisTitleY, { angle: 90 });
+        }
+        
+        currentY += imgHeight + 10;
         console.log('Chart image added to current page at Y:', currentY);
+        
+        // Add selected curves chart if there are hidden curves
+        const curveVisibility = curveVisibilityByDataset?.[dataset.id];
+        const hasHiddenCurves = curveVisibility && curveVisibility.some(visible => !visible);
+        
+        if (selectedCurvesChartImage && selectedCurvesChartImage.trim() !== '' && hasHiddenCurves) {
+          pdf.setFontSize(12);
+          pdf.setTextColor(138, 0, 81);
+          pdf.text('Selected Curves Only', margin, currentY);
+          currentY += 8;
+          
+          pdf.addImage(selectedCurvesChartImage, 'PNG', margin, currentY, imgWidth, imgHeight);
+          console.log('Selected curves chart added to current page');
+        }
       } else {
         // Add to next page with proper formatting
         pdf.addPage();
@@ -408,11 +468,45 @@ async function addDatasetPage(
         pdf.setTextColor(100, 100, 100);
         pdf.text('Concentration-Response Curves', margin, 35);
         
-        // Add chart image with better sizing
-        const imgWidth = Math.min(200, contentWidth);
-        const imgHeight = (imgWidth * 0.7);
-        pdf.addImage(chartImage, 'PNG', margin, 45, imgWidth, imgHeight);
+        // Add all curves chart image
+        const imgWidth = Math.min(180, contentWidth);
+        const imgHeight = (imgWidth * 0.6); // Better aspect ratio for charts
+        
+        pdf.setFontSize(12);
+        pdf.setTextColor(138, 0, 81);
+        pdf.text('All Curves', margin, 45);
+        
+        pdf.addImage(chartImage, 'PNG', margin, 55, imgWidth, imgHeight);
+        
+                 // Add Y-axis title directly as text overlay for new page
+         const yAxisLabel = getYAxisLabel(dataset);
+         if (yAxisLabel) {
+           pdf.setFontSize(10);
+           pdf.setFont('helvetica', 'bold');
+           pdf.setTextColor(0, 0, 0);
+          
+          // Position Y-axis title closer to the chart
+          const yAxisTitleX = margin + 8;
+          const yAxisTitleY = 55 + (imgHeight / 2);
+          
+          // Rotate text -90 degrees and position it
+          pdf.text(yAxisLabel, yAxisTitleX, yAxisTitleY, { angle: 90 });
+        }
+        
         console.log('Chart image added to new page in PDF');
+        
+        // Add selected curves chart if there are hidden curves
+        const curveVisibility = curveVisibilityByDataset?.[dataset.id];
+        const hasHiddenCurves = curveVisibility && curveVisibility.some(visible => !visible);
+        
+        if (selectedCurvesChartImage && selectedCurvesChartImage.trim() !== '' && hasHiddenCurves) {
+          pdf.setFontSize(12);
+          pdf.setTextColor(138, 0, 81);
+          pdf.text('Selected Curves Only', margin, 55 + imgHeight + 10);
+          
+          pdf.addImage(selectedCurvesChartImage, 'PNG', margin, 65 + imgHeight + 10, imgWidth, imgHeight);
+          console.log('Selected curves chart added to new page in PDF');
+        }
       }
     } catch (error) {
       console.error('Failed to add chart image to PDF:', error);
@@ -425,6 +519,27 @@ async function addDatasetPage(
   pdf.setFontSize(8);
   pdf.setTextColor(128, 128, 128);
   pdf.text(`Page ${pageNumber}`, margin, pdf.internal.pageSize.height - 10);
+}
+
+// Helper function to get Y-axis label based on dataset
+function getYAxisLabel(dataset: Dataset): string {
+  const assayType = dataset.assayType?.toLowerCase() || '';
+  if (assayType.includes('cytotoxicity') || assayType.includes('killing')) {
+    return '% Cytotoxicity';
+  } else if (assayType.includes('cd4') && assayType.includes('activation')) {
+    return 'CD4 Activation (%)';
+  } else if (assayType.includes('cd8') && assayType.includes('activation')) {
+    return 'CD8 Activation (%)';
+  } else if (assayType.includes('activation')) {
+    return 'Activation (%)';
+  } else if (assayType.includes('degranulation')) {
+    return 'Degranulation (%)';
+  } else if (assayType.includes('proliferation')) {
+    return 'Proliferation (%)';
+  } else if (assayType.includes('target')) {
+    return 'Target Cells (%)';
+  }
+  return 'Response (%)';
 }
 
 // Helper function to capture chart as image (requires DOM element)
@@ -454,13 +569,23 @@ export async function captureChartImage(): Promise<string | null> {
       console.log(`SVG ${i} dimensions:`, svg.getAttribute('width'), 'x', svg.getAttribute('height'));
     });
     
-    // Try to capture the entire chart container (including legend) first
+    // Try to capture the entire chart container (including legend and Y-axis label) first
     const fullChartContainer = document.querySelector('[data-testid="chart-container"]') as HTMLElement;
     
     if (fullChartContainer) {
-      console.log('Found chart container, attempting to capture entire container (with legend)');
+      console.log('Found chart container, attempting to capture entire container (with legend and Y-axis label)');
       const containerRect = fullChartContainer.getBoundingClientRect();
       console.log('Container dimensions:', containerRect.width, 'x', containerRect.height);
+      
+      // Ensure the Y-axis label is visible before capture
+      const yAxisLabel = fullChartContainer.querySelector('div[style*="transform"][style*="rotate"]') as HTMLElement;
+      if (yAxisLabel) {
+        console.log('Found Y-axis label in container, ensuring visibility');
+        yAxisLabel.style.visibility = 'visible';
+        yAxisLabel.style.display = 'block';
+        yAxisLabel.style.opacity = '1';
+        yAxisLabel.style.zIndex = '999';
+      }
       
       // Debug legend elements more thoroughly
       const allLegendSelectors = [
@@ -505,19 +630,26 @@ export async function captureChartImage(): Promise<string | null> {
       try {
         const containerCanvas = await html2canvas(fullChartContainer, {
           backgroundColor: '#ffffff',
-          scale: 1, // Use scale 1 for reliability
+          scale: 2, // Higher scale for better quality
           useCORS: true,
           allowTaint: true,
           logging: false,
           removeContainer: false,
-          width: fullChartContainer.scrollWidth, // Use scrollWidth to ensure full content
-          height: fullChartContainer.scrollHeight, // Use scrollHeight to ensure full content
+          width: 1200, // Fixed width for consistent aspect ratio
+          height: 800, // Fixed height for consistent aspect ratio
           ignoreElements: (element) => {
             // Only ignore tooltip elements, keep legends
             return element.classList.contains('recharts-tooltip-wrapper');
           },
           onclone: (clonedDoc) => {
-            console.log('Processing cloned document for legend visibility...');
+            console.log('Processing cloned document for legend and Y-axis label visibility...');
+            
+            // First, let's see the entire structure
+            console.log('=== CLONED DOCUMENT STRUCTURE ===');
+            const chartContainer = clonedDoc.querySelector('[data-testid="chart-container"]');
+            if (chartContainer) {
+              console.log('Chart container HTML structure:', chartContainer.innerHTML.substring(0, 1000));
+            }
             
             // Target all possible legend selectors
             const legendSelectors = [
@@ -535,11 +667,21 @@ export async function captureChartImage(): Promise<string | null> {
               clonedLegends.forEach((el) => {
                 const htmlEl = el as HTMLElement;
                 htmlEl.style.visibility = 'visible';
-                htmlEl.style.display = 'block';
+                htmlEl.style.display = 'flex';
+                htmlEl.style.alignItems = 'center';
                 htmlEl.style.opacity = '1';
                 htmlEl.style.color = '#000000';
                 htmlEl.style.fontSize = '14px';
                 htmlEl.style.fontFamily = 'Arial, sans-serif';
+                htmlEl.style.lineHeight = '1.2';
+                htmlEl.style.marginBottom = '4px';
+                
+                // Fix alignment for legend items specifically
+                if (el.classList.contains('recharts-legend-item')) {
+                  htmlEl.style.display = 'flex';
+                  htmlEl.style.alignItems = 'center';
+                  htmlEl.style.gap = '8px';
+                }
               });
             });
             
@@ -552,16 +694,79 @@ export async function captureChartImage(): Promise<string | null> {
               }
             });
             
-            // Ensure custom Y-axis label is captured
-            const customYAxisLabel = clonedDoc.querySelector('[style*="transform"][style*="rotate"]');
-            if (customYAxisLabel) {
-              const htmlEl = customYAxisLabel as HTMLElement;
+            // Ensure custom Y-axis label is captured - look for the data attribute first
+            const customYAxisLabels = clonedDoc.querySelectorAll('div[data-y-axis-label="true"]');
+            console.log(`Found ${customYAxisLabels.length} custom Y-axis labels with data attribute`);
+            customYAxisLabels.forEach((label) => {
+              const htmlEl = label as HTMLElement;
               htmlEl.style.visibility = 'visible';
               htmlEl.style.display = 'block';
               htmlEl.style.opacity = '1';
               htmlEl.style.color = '#000000';
               htmlEl.style.zIndex = '999';
-            }
+              htmlEl.style.position = 'absolute';
+              htmlEl.style.pointerEvents = 'none';
+              console.log('Y-axis label styles applied:', htmlEl.style.cssText);
+            });
+            
+            // Also look for rotated divs as fallback - broader search
+            const rotatedSelectors = [
+              'div[style*="transform"][style*="rotate"]',
+              'div[style*="rotate(-90deg)"]',
+              'div[style*="rotate(270deg)"]',
+              '*[style*="rotate(-90deg)"]'
+            ];
+            
+            rotatedSelectors.forEach(selector => {
+              const rotatedDivs = clonedDoc.querySelectorAll(selector);
+              console.log(`Found ${rotatedDivs.length} elements with ${selector}`);
+              rotatedDivs.forEach((label) => {
+                const htmlEl = label as HTMLElement;
+                htmlEl.style.visibility = 'visible !important';
+                htmlEl.style.display = 'block !important';
+                htmlEl.style.opacity = '1 !important';
+                htmlEl.style.color = '#000000 !important';
+                htmlEl.style.zIndex = '999';
+                htmlEl.style.position = 'absolute';
+                htmlEl.style.fontSize = '18px !important';
+                htmlEl.style.fontWeight = 'bold !important';
+                console.log(`${selector} styles applied:`, htmlEl.textContent?.substring(0, 20));
+              });
+            });
+            
+            // Search for Y-axis labels by common text content
+            const yAxisLabelTexts = ['% Cytotoxicity', 'Cytotoxicity', 'Response (%)', 'CD4 Activation', 'CD8 Activation', 'Activation'];
+            yAxisLabelTexts.forEach(labelText => {
+              const textElements = clonedDoc.querySelectorAll('*');
+              Array.from(textElements).forEach((el) => {
+                if (el.textContent && el.textContent.includes(labelText)) {
+                  const htmlEl = el as HTMLElement;
+                  htmlEl.style.visibility = 'visible !important';
+                  htmlEl.style.display = 'block !important';
+                  htmlEl.style.opacity = '1 !important';
+                  htmlEl.style.color = '#000000 !important';
+                  htmlEl.style.fontSize = '18px !important';
+                  htmlEl.style.fontWeight = 'bold !important';
+                  console.log(`Found Y-axis label by text "${labelText}":`, el.tagName);
+                }
+              });
+            });
+            
+            // Also look for any div with Y-axis label text
+            const allDivs = clonedDoc.querySelectorAll('div');
+            allDivs.forEach((div) => {
+              const htmlEl = div as HTMLElement;
+              const text = htmlEl.textContent || '';
+              if (text.includes('%') && (text.includes('Cytotoxicity') || text.includes('Activation') || text.includes('Response'))) {
+                console.log('Found Y-axis label div:', text);
+                htmlEl.style.visibility = 'visible';
+                htmlEl.style.display = 'block';
+                htmlEl.style.opacity = '1';
+                htmlEl.style.color = '#000000';
+                htmlEl.style.zIndex = '999';
+                htmlEl.style.position = 'absolute';
+              }
+            });
             
             // Ensure any span elements (legends might use spans) are visible
             const spanElements = clonedDoc.querySelectorAll('span, div');
@@ -682,7 +887,7 @@ export async function captureChartImage(): Promise<string | null> {
     
     console.log('Final chart element to capture:', chartElement.tagName, chartElement.className);
     
-    // Simplified html2canvas options for reliable capture with legend support
+    // Simplified html2canvas options for reliable capture with legend and Y-axis label support
     const canvas = await html2canvas(chartElement, {
       backgroundColor: '#ffffff',
       scale: 2, // Higher scale for better quality
@@ -693,7 +898,7 @@ export async function captureChartImage(): Promise<string | null> {
       width: chartElement.scrollWidth, // Ensure full width including legend
       height: chartElement.scrollHeight, // Ensure full height
       ignoreElements: (element) => {
-        // Only ignore tooltip elements, keep legends
+        // Only ignore tooltip elements, keep legends and Y-axis labels
         return element.classList.contains('recharts-tooltip-wrapper');
       },
       onclone: (clonedDoc) => {
