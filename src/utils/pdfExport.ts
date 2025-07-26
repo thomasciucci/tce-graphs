@@ -58,6 +58,7 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
     // Switch to this dataset if callback provided
     let datasetChartImage = '';
     let selectedCurvesChartImage = '';
+    let barChartImage = '';
     if (onDatasetSwitch) {
       console.log(`Switching to dataset ${i}: ${dataset.name}`);
       await onDatasetSwitch(i);
@@ -120,10 +121,36 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
         }
         selectedCurvesChartImage = capturedImage || '';
       }
+      
+      // Capture bar chart if available and visible
+      console.log('Attempting to capture bar chart...');
+      const barChartContainer = document.querySelector('[data-testid="bar-chart-container"]');
+      if (barChartContainer) {
+        // Check if bar chart is actually visible (not hidden)
+        const containerRect = barChartContainer.getBoundingClientRect();
+        const isVisible = containerRect.width > 0 && containerRect.height > 0 && 
+                         window.getComputedStyle(barChartContainer).display !== 'none' &&
+                         window.getComputedStyle(barChartContainer).visibility !== 'hidden';
+        
+        if (isVisible) {
+          console.log('Bar chart container found and visible, capturing...');
+          const barCapturedImage = await captureChartImage('bar');
+          if (barCapturedImage) {
+            barChartImage = barCapturedImage;
+            console.log('Bar chart captured successfully');
+          } else {
+            console.log('Bar chart capture failed');
+          }
+        } else {
+          console.log('Bar chart container found but not visible, skipping capture');
+        }
+      } else {
+        console.log('No bar chart container found');
+      }
     }
 
     // Single page with all data for this dataset
-    await addDatasetPage(pdf, dataset, originalData, editedData, fittedCurves, curveColors, currentPage, datasetChartImage, selectedCurvesChartImage, curveVisibilityByDataset);
+    await addDatasetPage(pdf, dataset, originalData, editedData, fittedCurves, curveColors, currentPage, datasetChartImage, selectedCurvesChartImage, curveVisibilityByDataset, barChartImage);
     currentPage++;
   }
 
@@ -210,7 +237,8 @@ async function addDatasetPage(
   pageNumber: number, 
   chartImage?: string,
   selectedCurvesChartImage?: string,
-  curveVisibilityByDataset?: Record<string, boolean[]>
+  curveVisibilityByDataset?: Record<string, boolean[]>,
+  barChartImage?: string
 ): Promise<void> {
   pdf.addPage();
   
@@ -515,6 +543,57 @@ async function addDatasetPage(
     console.log('No chart image available for PDF');
   }
 
+  // Add bar chart if available
+  if (barChartImage && barChartImage.trim() !== '') {
+    try {
+      console.log('Adding bar chart to PDF...');
+      
+      // Add to new page for bar chart
+      pdf.addPage();
+      
+      // Add title to the new page
+      pdf.setFontSize(16);
+      pdf.setTextColor(138, 0, 81);
+      pdf.text('Bar Chart Visualization', margin, 25);
+      
+      // Add subtitle
+      pdf.setFontSize(12);
+      pdf.setTextColor(100, 100, 100);
+      pdf.text('Response Data by Sample', margin, 35);
+      
+      // Add bar chart image
+      const imgWidth = Math.min(180, contentWidth);
+      const imgHeight = (imgWidth * 0.6); // Better aspect ratio for charts
+      
+      pdf.setFontSize(12);
+      pdf.setTextColor(138, 0, 81);
+      pdf.text('Bar Chart View', margin, 45);
+      
+      pdf.addImage(barChartImage, 'PNG', margin, 55, imgWidth, imgHeight);
+      
+      // Add Y-axis title directly as text overlay for bar chart
+      const yAxisLabel = getYAxisLabel(dataset);
+      if (yAxisLabel) {
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(0, 0, 0);
+       
+        // Position Y-axis title closer to the chart
+        const yAxisTitleX = margin + 8;
+        const yAxisTitleY = 55 + (imgHeight / 2);
+        
+        // Rotate text -90 degrees and position it
+        pdf.text(yAxisLabel, yAxisTitleX, yAxisTitleY, { angle: 90 });
+      }
+      
+      console.log('Bar chart image added to PDF');
+    } catch (error) {
+      console.error('Failed to add bar chart to PDF:', error);
+    }
+  } else {
+    console.log('No bar chart image available for PDF');
+  }
+
   // Add page number
   pdf.setFontSize(8);
   pdf.setTextColor(128, 128, 128);
@@ -543,7 +622,7 @@ function getYAxisLabel(dataset: Dataset): string {
 }
 
 // Helper function to capture chart as image (requires DOM element)
-export async function captureChartImage(): Promise<string | null> {
+export async function captureChartImage(chartType: 'curve' | 'bar' = 'curve'): Promise<string | null> {
   try {
     console.log('Starting chart capture...');
     
@@ -569,8 +648,9 @@ export async function captureChartImage(): Promise<string | null> {
       console.log(`SVG ${i} dimensions:`, svg.getAttribute('width'), 'x', svg.getAttribute('height'));
     });
     
-    // Try to capture the entire chart container (including legend and Y-axis label) first
-    const fullChartContainer = document.querySelector('[data-testid="chart-container"]') as HTMLElement;
+    // Try to capture the appropriate chart container based on chart type
+    const chartSelector = chartType === 'bar' ? '[data-testid="bar-chart-container"]' : '[data-testid="chart-container"]';
+    const fullChartContainer = document.querySelector(chartSelector) as HTMLElement;
     
     if (fullChartContainer) {
       console.log('Found chart container, attempting to capture entire container (with legend and Y-axis label)');
