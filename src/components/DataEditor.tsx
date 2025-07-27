@@ -95,6 +95,18 @@ const DataEditor = React.memo(function DataEditor({ data, onDataUpdate, datasets
     setEditingData(prev => prev.filter((_, i) => i !== index));
   }, []);
 
+  const removeColumn = useCallback((colIndex: number) => {
+    setEditingData(prev => prev.map(row => ({
+      ...row,
+      responses: row.responses.filter((_, i) => i !== colIndex),
+      sampleNames: row.sampleNames.filter((_, i) => i !== colIndex),
+      replicateGroups: row.replicateGroups ? row.replicateGroups.filter((_, i) => i !== colIndex) : undefined
+    })));
+    
+    // Update replicate groups state
+    setReplicateGroups(prev => prev.filter((_, i) => i !== colIndex));
+  }, []);
+
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
@@ -187,7 +199,20 @@ const DataEditor = React.memo(function DataEditor({ data, onDataUpdate, datasets
                 </th>
                 {currentData[0].sampleNames.map((name, index) => (
                   <th key={`header_${name || 'col'}_${index}`} className="border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-700">
-                    <div>{name}</div>
+                    <div className="flex items-center justify-between">
+                      <span>{name}</span>
+                      {isEditing && currentData[0].sampleNames.length > 1 && (
+                        <button
+                          onClick={() => removeColumn(index)}
+                          className="ml-2 p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors duration-200"
+                          title="Remove column"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   </th>
                 ))}
                 {isEditing && (

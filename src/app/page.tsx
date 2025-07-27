@@ -32,6 +32,17 @@ export default function Home() {
   const [isFittingAll, setIsFittingAll] = useState(false);
   const [curveColorsByDataset, setCurveColorsByDataset] = useState<Record<string, string[]>>({});
   const [curveVisibilityByDataset, setCurveVisibilityByDataset] = useState<Record<string, boolean[]>>({});
+  
+  // Global chart settings that apply to all datasets
+  const [globalChartSettings, setGlobalChartSettings] = useState({
+    showGroups: true,
+    showIndividuals: true,
+    showCurveChart: true,
+    showBarChart: false
+  });
+  const [globalCurveColors, setGlobalCurveColors] = useState<string[]>([]);
+  const [globalCurveVisibility, setGlobalCurveVisibility] = useState<boolean[]>([]);
+  
   const [fitAllProgress, setFitAllProgress] = useState(0);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [showPrismExportModal, setShowPrismExportModal] = useState(false);
@@ -169,7 +180,10 @@ export default function Home() {
       setTimeout(() => {
         const curves = fitCurvesForData(updatedData);
         setFittedCurves(curves);
-        setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+        const newColors = curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
+        setCurveColors(newColors);
+        setGlobalCurveColors(newColors);
+        setGlobalCurveVisibility(curves.map(() => true));
       }, 100);
     } else if (pendingDatasets.length > 0) {
       if (workflowOptions.mergeTables) {
@@ -213,7 +227,10 @@ export default function Home() {
         setTimeout(() => {
           const curves = fitCurvesForData(allData);
           setFittedCurves(curves);
-          setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+          const newColors = curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
+          setCurveColors(newColors);
+          setGlobalCurveColors(newColors);
+          setGlobalCurveVisibility(curves.map(() => true));
         }, 100);
       } else if (workflowOptions.sameFormat) {
         // Apply to all tables
@@ -290,23 +307,48 @@ export default function Home() {
 
   const handleCurveFitting = async (curves: FittedCurve[]) => {
     setFittedCurves(curves);
+    
+    // Initialize global settings based on the first dataset's curves
+    if (globalCurveColors.length === 0 || globalCurveColors.length !== curves.length) {
+      setGlobalCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+      setGlobalCurveVisibility(curves.map(() => true));
+    }
+    
     if (datasets.length > 0) {
       const datasetId = datasets[activeDatasetIndex]?.id;
       if (datasetId) {
         setFittedCurvesByDataset(prev => ({ ...prev, [datasetId]: curves }));
-        // Initialize colors for this dataset if not already set
+        // Initialize colors for this dataset if not already set - use global colors
         setCurveColorsByDataset(prev => {
           if (prev[datasetId]) return prev;
-          return { ...prev, [datasetId]: curves.map((_, idx) => defaultColors[idx % defaultColors.length]) };
+          return { ...prev, [datasetId]: globalCurveColors.length > 0 ? globalCurveColors : curves.map((_, idx) => defaultColors[idx % defaultColors.length]) };
         });
-        // Initialize visibility for this dataset if not already set
+        // Initialize visibility for this dataset - use global visibility if available, otherwise all true
         setCurveVisibilityByDataset(prev => {
-          if (prev[datasetId]) return prev;
-          return { ...prev, [datasetId]: curves.map(() => true) };
+          const newVisibility = globalCurveVisibility.length > 0 ? [...globalCurveVisibility] : curves.map(() => true);
+          // Ensure the array is the right length
+          while (newVisibility.length < curves.length) {
+            newVisibility.push(true);
+          }
+          return { ...prev, [datasetId]: newVisibility };
         });
       }
     } else {
-      setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+      const newColors = globalCurveColors.length > 0 ? globalCurveColors : curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
+      setCurveColors(newColors);
+      if (globalCurveColors.length === 0) {
+        setGlobalCurveColors(newColors);
+        setGlobalCurveVisibility(curves.map(() => true));
+      }
+      
+      // Initialize visibility for single dataset case
+      setCurveVisibilityByDataset(prev => {
+        const newVisibility = globalCurveVisibility.length > 0 ? [...globalCurveVisibility] : curves.map(() => true);
+        while (newVisibility.length < curves.length) {
+          newVisibility.push(true);
+        }
+        return { ...prev, 'single': newVisibility };
+      });
     }
     setIsProcessing(false);
   };
@@ -362,14 +404,42 @@ export default function Home() {
       setFittedCurves(curves);
       setFittedCurvesByDataset(prev => ({ ...prev, [dataset.id]: curves }));
       // Set colors for this dataset
-      setCurveColorsByDataset(prev => ({ ...prev, [dataset.id]: curves.map((_, idx) => defaultColors[idx % defaultColors.length]) }));
-      setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+      const newColors = curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
+      setCurveColorsByDataset(prev => ({ ...prev, [dataset.id]: newColors }));
+      setCurveColors(newColors);
+      if (globalCurveColors.length === 0) {
+        setGlobalCurveColors(newColors);
+        setGlobalCurveVisibility(curves.map(() => true));
+      }
+      
+      // Initialize visibility for this dataset
+      setCurveVisibilityByDataset(prev => {
+        const newVisibility = globalCurveVisibility.length > 0 ? [...globalCurveVisibility] : curves.map(() => true);
+        while (newVisibility.length < curves.length) {
+          newVisibility.push(true);
+        }
+        return { ...prev, [dataset.id]: newVisibility };
+      });
     } else if (data.length > 0) {
       // Single dataset in 'data' (not in datasets array) - use edited data if available
       const dataToFit = editedDataByDataset['single'] || data;
       const curves = fitCurvesForData(dataToFit);
       setFittedCurves(curves);
-      setCurveColors(curves.map((_, idx) => defaultColors[idx % defaultColors.length]));
+      const newColors = curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
+      setCurveColors(newColors);
+      if (globalCurveColors.length === 0) {
+        setGlobalCurveColors(newColors);
+        setGlobalCurveVisibility(curves.map(() => true));
+      }
+      
+      // Initialize visibility for single dataset case
+      setCurveVisibilityByDataset(prev => {
+        const newVisibility = globalCurveVisibility.length > 0 ? [...globalCurveVisibility] : curves.map(() => true);
+        while (newVisibility.length < curves.length) {
+          newVisibility.push(true);
+        }
+        return { ...prev, 'single': newVisibility };
+      });
     }
   };
 
@@ -407,6 +477,7 @@ export default function Home() {
         curveVisibilityByDataset: datasets.length > 0 ? curveVisibilityByDataset : { 'single': curveVisibilityByDataset['single'] || [] },
         assayType: datasets[activeDatasetIndex]?.assayType,
         chartImage,
+        globalChartSettings,
         // Add callbacks for PDF generation
         onDatasetSwitch: datasets.length > 1 ? handleSwitchDataset : undefined,
         onCurveVisibilityChange: handleCurveVisibilityChangeForPDF
@@ -449,44 +520,6 @@ export default function Home() {
     await new Promise(resolve => setTimeout(resolve, 100));
   };
 
-  // Handle color change for current dataset
-  const handleColorChange = (idx: number, color: string) => {
-    if (datasets.length > 0) {
-      const datasetId = datasets[activeDatasetIndex]?.id;
-      if (datasetId) {
-        setCurveColorsByDataset(prev => {
-          const newColors = prev[datasetId] ? [...prev[datasetId]] : [];
-          newColors[idx] = color;
-          return { ...prev, [datasetId]: newColors };
-        });
-        setCurveColors(prev => {
-          const newColors = [...prev];
-          newColors[idx] = color;
-          return newColors;
-        });
-      }
-    } else {
-      setCurveColors(prev => {
-        const newColors = [...prev];
-        newColors[idx] = color;
-        return newColors;
-      });
-    }
-  };
-
-  // Handle curve visibility change for current dataset
-  const handleCurveVisibilityChange = (idx: number, visible: boolean) => {
-    if (datasets.length > 0) {
-      const datasetId = datasets[activeDatasetIndex]?.id;
-      if (datasetId) {
-        setCurveVisibilityByDataset(prev => {
-          const newVisibility = prev[datasetId] ? [...prev[datasetId]] : [];
-          newVisibility[idx] = visible;
-          return { ...prev, [datasetId]: newVisibility };
-        });
-      }
-    }
-  };
 
   // Handle curve visibility change for PDF export (with dataset ID)
   const handleCurveVisibilityChangeForPDF = async (datasetId: string, curveIndex: number, visible: boolean) => {
@@ -503,12 +536,92 @@ export default function Home() {
     await new Promise(resolve => setTimeout(resolve, 100));
   };
 
+  // Global handlers that apply changes to all datasets
+  const handleGlobalChartSettingsChange = (setting: keyof typeof globalChartSettings, value: boolean) => {
+    setGlobalChartSettings(prev => ({ ...prev, [setting]: value }));
+  };
+
+  const handleGlobalColorChange = (idx: number, color: string) => {
+    // Update global colors
+    setGlobalCurveColors(prev => {
+      const newColors = [...prev];
+      newColors[idx] = color;
+      return newColors;
+    });
+
+    // Apply to all datasets
+    setCurveColorsByDataset(prev => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach(datasetId => {
+        if (updated[datasetId] && updated[datasetId][idx] !== undefined) {
+          updated[datasetId][idx] = color;
+        }
+      });
+      return updated;
+    });
+
+    // Also update current single dataset colors if applicable
+    setCurveColors(prev => {
+      const newColors = [...prev];
+      newColors[idx] = color;
+      return newColors;
+    });
+  };
+
+  const handleGlobalVisibilityChange = (idx: number, visible: boolean) => {
+    // Update global visibility
+    setGlobalCurveVisibility(prev => {
+      const newVisibility = [...prev];
+      newVisibility[idx] = visible;
+      return newVisibility;
+    });
+
+    // Apply to all datasets - ensure we handle both existing and non-existing datasets
+    setCurveVisibilityByDataset(prev => {
+      const updated = { ...prev };
+      
+      // If we have datasets, update all of them
+      if (datasets.length > 0) {
+        datasets.forEach(dataset => {
+          const datasetId = dataset.id;
+          if (!updated[datasetId]) {
+            // Initialize if not exists
+            updated[datasetId] = new Array(idx + 1).fill(true);
+          }
+          
+          // Ensure the array is long enough
+          const currentArray = [...updated[datasetId]];
+          while (currentArray.length <= idx) {
+            currentArray.push(true); // Default new entries to visible
+          }
+          currentArray[idx] = visible;
+          updated[datasetId] = currentArray;
+        });
+      } else {
+        // For single dataset case, use 'single' as key
+        const datasetId = 'single';
+        if (!updated[datasetId]) {
+          updated[datasetId] = new Array(idx + 1).fill(true);
+        }
+        
+        const currentArray = [...updated[datasetId]];
+        while (currentArray.length <= idx) {
+          currentArray.push(true);
+        }
+        currentArray[idx] = visible;
+        updated[datasetId] = currentArray;
+      }
+      
+      return updated;
+    });
+  };
+
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen" style={{ backgroundColor: '#F2E6ED' }}>
       {/* Simple App Title */}
       <header className="w-full py-8 mb-8">
         <h1 className="text-4xl md:text-5xl font-extrabold text-center" style={{ color: '#8A0051', letterSpacing: '0.05em' }}>
-          iDose Studio
+          nVitro Studio
         </h1>
       </header>
       <div className="max-w-7xl mx-auto">
@@ -870,12 +983,14 @@ export default function Home() {
                         ? datasets[0]?.assayType
                         : ''
                   }
-                  onColorChange={handleColorChange}
-                  onCurveVisibilityChange={handleCurveVisibilityChange}
-                  curveVisibility={currentDatasetId ? curveVisibilityByDataset[currentDatasetId] : undefined}
+                  onColorChange={handleGlobalColorChange}
+                  onCurveVisibilityChange={handleGlobalVisibilityChange}
+                  curveVisibility={currentDatasetId ? curveVisibilityByDataset[currentDatasetId] : globalCurveVisibility}
                   datasets={datasets}
                   activeDatasetIndex={activeDatasetIndex}
                   onDatasetChange={handleSwitchDataset}
+                  globalChartSettings={globalChartSettings}
+                  onGlobalChartSettingsChange={handleGlobalChartSettingsChange}
                   hasReplicates={workflowOptions.hasReplicates}
                 />
               )}

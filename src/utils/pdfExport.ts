@@ -16,6 +16,12 @@ interface PDFExportOptions {
   curveVisibilityByDataset?: Record<string, boolean[]>;
   assayType?: string;
   chartImage?: string;
+  globalChartSettings?: {
+    showGroups: boolean;
+    showIndividuals: boolean;
+    showCurveChart: boolean;
+    showBarChart: boolean;
+  };
 }
 
 // Add interface for dataset switching callback
@@ -34,6 +40,7 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
       curveColorsByDataset,
       curveVisibilityByDataset,
       assayType,
+      globalChartSettings,
       onDatasetSwitch,
       onCurveVisibilityChange
     } = options;
@@ -66,6 +73,59 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
       // Wait for UI to update
       await new Promise(resolve => setTimeout(resolve, 1500));
       
+      // Capture bar chart FIRST (before any curve visibility manipulations)
+      console.log('=== BAR CHART CAPTURE ATTEMPT ===');
+      console.log('globalChartSettings:', globalChartSettings);
+      console.log('showBarChart setting:', globalChartSettings?.showBarChart);
+      
+      if (globalChartSettings?.showBarChart) {
+        console.log('Bar chart is enabled, attempting to capture...');
+        const barChartContainer = document.querySelector('[data-testid="bar-chart-container"]');
+        console.log('Bar chart container found:', !!barChartContainer);
+        
+        if (barChartContainer) {
+          // Check if bar chart is actually visible (not hidden)
+          const containerRect = barChartContainer.getBoundingClientRect();
+          const computedStyle = window.getComputedStyle(barChartContainer);
+          
+          console.log('Bar chart container dimensions:', containerRect);
+          console.log('Bar chart container display:', computedStyle.display);
+          console.log('Bar chart container visibility:', computedStyle.visibility);
+          
+          const isVisible = containerRect.width > 0 && containerRect.height > 0 && 
+                           computedStyle.display !== 'none' &&
+                           computedStyle.visibility !== 'hidden';
+          
+          console.log('Bar chart is visible:', isVisible);
+          
+          if (isVisible) {
+            console.log('Bar chart container found and visible, capturing...');
+            const barCapturedImage = await captureChartImage('bar');
+            console.log('Bar chart capture result:', barCapturedImage ? 'success' : 'failed');
+            console.log('Bar chart image length:', barCapturedImage?.length || 0);
+            
+            if (barCapturedImage) {
+              barChartImage = barCapturedImage;
+              console.log('Bar chart captured successfully, image length:', barCapturedImage.length);
+            } else {
+              console.log('Bar chart capture failed - returned null/empty');
+            }
+          } else {
+            console.log('Bar chart container found but not visible, skipping capture');
+          }
+        } else {
+          console.log('No bar chart container found');
+          // Check if there are any elements with data-testid containing "bar"
+          const allTestIds = Array.from(document.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid'));
+          console.log('All available data-testids:', allTestIds);
+        }
+      } else {
+        console.log('Bar chart is disabled in settings, skipping capture');
+      }
+      
+      console.log('Final barChartImage result:', barChartImage ? 'captured' : 'empty');
+      
+      // Now proceed with curve chart captures
       // First, ensure all curves are visible for the "All Curves" capture
       const curveVisibility = curveVisibilityByDataset?.[dataset.id];
       const hasHiddenCurves = curveVisibility && curveVisibility.some(visible => !visible);
@@ -120,32 +180,6 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
           console.log(`Failed to capture chart for ${dataset.name}`);
         }
         selectedCurvesChartImage = capturedImage || '';
-      }
-      
-      // Capture bar chart if available and visible
-      console.log('Attempting to capture bar chart...');
-      const barChartContainer = document.querySelector('[data-testid="bar-chart-container"]');
-      if (barChartContainer) {
-        // Check if bar chart is actually visible (not hidden)
-        const containerRect = barChartContainer.getBoundingClientRect();
-        const isVisible = containerRect.width > 0 && containerRect.height > 0 && 
-                         window.getComputedStyle(barChartContainer).display !== 'none' &&
-                         window.getComputedStyle(barChartContainer).visibility !== 'hidden';
-        
-        if (isVisible) {
-          console.log('Bar chart container found and visible, capturing...');
-          const barCapturedImage = await captureChartImage('bar');
-          if (barCapturedImage) {
-            barChartImage = barCapturedImage;
-            console.log('Bar chart captured successfully');
-          } else {
-            console.log('Bar chart capture failed');
-          }
-        } else {
-          console.log('Bar chart container found but not visible, skipping capture');
-        }
-      } else {
-        console.log('No bar chart container found');
       }
     }
 
@@ -547,6 +581,8 @@ async function addDatasetPage(
   if (barChartImage && barChartImage.trim() !== '') {
     try {
       console.log('Adding bar chart to PDF...');
+      console.log('Bar chart image length:', barChartImage.length);
+      console.log('Bar chart image starts with:', barChartImage.substring(0, 50));
       
       // Add to new page for bar chart
       pdf.addPage();
@@ -592,6 +628,9 @@ async function addDatasetPage(
     }
   } else {
     console.log('No bar chart image available for PDF');
+    console.log('barChartImage value:', barChartImage);
+    console.log('barChartImage type:', typeof barChartImage);
+    console.log('barChartImage length:', barChartImage?.length);
   }
 
   // Add page number
@@ -629,33 +668,46 @@ export async function captureChartImage(chartType: 'curve' | 'bar' = 'curve'): P
     // Wait for chart to be fully rendered
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // Debug: Log all available elements
-    console.log('=== DEBUGGING CHART ELEMENTS ===');
-    const chartContainer = document.querySelector('[data-testid="chart-container"]');
-    console.log('Chart container found:', !!chartContainer);
-    if (chartContainer) {
-      console.log('Chart container children:', chartContainer.children.length);
-      Array.from(chartContainer.children).forEach((child, i) => {
-        console.log(`Child ${i}:`, child.tagName, child.className);
-      });
-    }
-    
+    // Brief debug logging
+    console.log('=== CHART CAPTURE DEBUG ===');
     const allSvgs = document.querySelectorAll('svg');
     console.log('Total SVGs found:', allSvgs.length);
-    allSvgs.forEach((svg, i) => {
-      console.log(`SVG ${i}:`, svg.getAttribute('class'), svg.children.length, 'children');
-      console.log(`SVG ${i} viewBox:`, svg.getAttribute('viewBox'));
-      console.log(`SVG ${i} dimensions:`, svg.getAttribute('width'), 'x', svg.getAttribute('height'));
-    });
     
     // Try to capture the appropriate chart container based on chart type
     const chartSelector = chartType === 'bar' ? '[data-testid="bar-chart-container"]' : '[data-testid="chart-container"]';
+    console.log(`Looking for chart with selector: ${chartSelector} (chartType: ${chartType})`);
+    
+    // Debug: Check if both containers exist
+    const barContainer = document.querySelector('[data-testid="bar-chart-container"]');
+    const curveContainer = document.querySelector('[data-testid="chart-container"]');
+    console.log('Bar container exists:', !!barContainer);
+    console.log('Curve container exists:', !!curveContainer);
+    
+    if (chartType === 'bar' && !barContainer) {
+      console.log('ERROR: Bar chart requested but bar-chart-container not found!');
+      return null;
+    }
+    
     const fullChartContainer = document.querySelector(chartSelector) as HTMLElement;
     
     if (fullChartContainer) {
       console.log('Found chart container, attempting to capture entire container (with legend and Y-axis label)');
       const containerRect = fullChartContainer.getBoundingClientRect();
       console.log('Container dimensions:', containerRect.width, 'x', containerRect.height);
+      
+      // Additional debugging for bar chart
+      if (chartType === 'bar') {
+        console.log('=== BAR CHART DEBUGGING ===');
+        console.log('Bar chart container HTML:', fullChartContainer.outerHTML.substring(0, 200));
+        const barChartSvg = fullChartContainer.querySelector('svg');
+        if (barChartSvg) {
+          console.log('Found SVG in bar chart container');
+          const bars = barChartSvg.querySelectorAll('rect');
+          console.log(`Number of bars found: ${bars.length}`);
+        } else {
+          console.log('No SVG found in bar chart container!');
+        }
+      }
       
       // Ensure the Y-axis label is visible before capture
       const yAxisLabel = fullChartContainer.querySelector('div[style*="transform"][style*="rotate"]') as HTMLElement;
@@ -884,9 +936,17 @@ export async function captureChartImage(chartType: 'curve' | 'bar' = 'curve'): P
     }
 
     // Alternative approach: Try to capture ResponsiveContainer with enhanced settings
-    const responsiveContainer = document.querySelector('.recharts-responsive-container') as HTMLElement;
+    // But make sure we're looking within the correct chart container based on chartType
+    const parentContainer = chartType === 'bar' 
+      ? document.querySelector('[data-testid="bar-chart-container"]')
+      : document.querySelector('[data-testid="chart-container"]');
+    
+    const responsiveContainer = parentContainer 
+      ? parentContainer.querySelector('.recharts-responsive-container') as HTMLElement
+      : document.querySelector('.recharts-responsive-container') as HTMLElement;
+      
     if (responsiveContainer) {
-      console.log('Trying ResponsiveContainer capture with enhanced settings...');
+      console.log(`Trying ResponsiveContainer capture with enhanced settings for ${chartType} chart...`);
       const containerRect = responsiveContainer.getBoundingClientRect();
       console.log('ResponsiveContainer dimensions:', containerRect.width, 'x', containerRect.height);
       
@@ -944,17 +1004,25 @@ export async function captureChartImage(chartType: 'curve' | 'bar' = 'curve'): P
     }
 
     // Fallback: Try multiple selectors to find the chart container (including legend)
+    // Prioritize the correct chart type container
+    const baseSelector = chartType === 'bar' ? '[data-testid="bar-chart-container"]' : '[data-testid="chart-container"]';
     const selectors = [
-      '[data-testid="chart-container"]', // This should include the full container with legend
+      baseSelector, // This should include the full container with legend for the correct chart type
       '.recharts-wrapper',
       '.recharts-responsive-container'
     ];
     
     let chartElement: HTMLElement | null = null;
     for (const selector of selectors) {
-      chartElement = document.querySelector(selector) as HTMLElement;
+      // For recharts-specific selectors, look within the correct parent container
+      if (selector.includes('recharts') && parentContainer) {
+        chartElement = parentContainer.querySelector(selector) as HTMLElement;
+      } else {
+        chartElement = document.querySelector(selector) as HTMLElement;
+      }
+      
       if (chartElement && chartElement.offsetWidth > 0 && chartElement.offsetHeight > 0) {
-        console.log(`Found chart container with selector: ${selector}`);
+        console.log(`Found chart container with selector: ${selector} (within ${chartType} container)`);
         console.log('Element dimensions:', chartElement.offsetWidth, 'x', chartElement.offsetHeight);
         break;
       }

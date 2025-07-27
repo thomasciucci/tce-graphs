@@ -1,6 +1,6 @@
 'use client';
 
-import React, { forwardRef, useState, useMemo } from 'react';
+import React, { forwardRef, useMemo } from 'react';
 import { ComposedChart, Line, Scatter, XAxis, YAxis, ResponsiveContainer, Legend, ErrorBar, BarChart, Bar } from 'recharts';
 import { DataPoint, FittedCurve } from '../types';
 
@@ -17,6 +17,13 @@ interface ResultsDisplayProps {
   activeDatasetIndex?: number;
   onDatasetChange?: (index: number) => void;
   hasReplicates?: boolean;
+  globalChartSettings?: {
+    showGroups: boolean;
+    showIndividuals: boolean;
+    showCurveChart: boolean;
+    showBarChart: boolean;
+  };
+  onGlobalChartSettingsChange?: (setting: 'showGroups' | 'showIndividuals' | 'showCurveChart' | 'showBarChart', value: boolean) => void;
 }
 
 const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({ 
@@ -31,7 +38,9 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
   datasets, 
   activeDatasetIndex, 
   onDatasetChange, 
-  hasReplicates = true
+  hasReplicates = true,
+  globalChartSettings,
+  onGlobalChartSettingsChange
 }, ref) => {
   console.log('ResultsDisplay received:', { data, fittedCurves, curveColors, datasetName, assayType });
   
@@ -65,11 +74,11 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
   //   data[0].replicateGroups.length === data[0].sampleNames.length &&
   //   new Set(data[0].replicateGroups).size < data[0].replicateGroups.length;
   
-  // UI toggles for showing groups/individuals
-  const [showGroups, setShowGroups] = useState(true);
-  const [showIndividuals, setShowIndividuals] = useState(true);
-  const [showCurveChart, setShowCurveChart] = useState(true);
-  const [showBarChart, setShowBarChart] = useState(false);
+  // Use global chart settings if available, otherwise fall back to local state
+  const showGroups = globalChartSettings?.showGroups ?? true;
+  const showIndividuals = globalChartSettings?.showIndividuals ?? true;
+  const showCurveChart = globalChartSettings?.showCurveChart ?? true;
+  const showBarChart = globalChartSettings?.showBarChart ?? false;
 
   // Identify group curves and individual curves
   const groupNames = Array.from(new Set((data[0]?.replicateGroups || []).filter(Boolean)));
@@ -365,13 +374,13 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                     <div className="flex gap-4 items-center">
                       {hasReplicates && (
                         <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={showGroups} onChange={e => setShowGroups(e.target.checked)} className="w-4 h-4" />
+                          <input type="checkbox" checked={showGroups} onChange={e => onGlobalChartSettingsChange?.('showGroups', e.target.checked)} className="w-4 h-4" />
                           <span className="text-sm">Show Replicate Groups</span>
                         </label>
                       )}
                       {hasReplicates && (
                         <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={showIndividuals} onChange={e => setShowIndividuals(e.target.checked)} className="w-4 h-4" />
+                          <input type="checkbox" checked={showIndividuals} onChange={e => onGlobalChartSettingsChange?.('showIndividuals', e.target.checked)} className="w-4 h-4" />
                           <span className="text-sm">Show Individual Data</span>
                         </label>
                       )}
@@ -385,7 +394,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                           <input 
                             type="checkbox" 
                             checked={showCurveChart} 
-                            onChange={e => setShowCurveChart(e.target.checked)} 
+                            onChange={e => onGlobalChartSettingsChange?.('showCurveChart', e.target.checked)} 
                             className="w-4 h-4"
                           />
                           <span className="text-sm">Curve Chart</span>
@@ -394,7 +403,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                           <input 
                             type="checkbox" 
                             checked={showBarChart} 
-                            onChange={e => setShowBarChart(e.target.checked)} 
+                            onChange={e => onGlobalChartSettingsChange?.('showBarChart', e.target.checked)} 
                             className="w-4 h-4"
                           />
                           <span className="text-sm">Bar Chart</span>
@@ -681,7 +690,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
               {showBarChart && barChartData.data.length > 0 && (
                 <div className="mb-6">
                   <h4 className="text-md font-medium text-gray-900 mb-3">Bar Chart View</h4>
-                  <div className="h-[600px] lg:h-[700px] w-full bg-white border border-gray-200 rounded-lg p-4 relative">
+                  <div className="h-[600px] lg:h-[700px] w-full bg-white border border-gray-200 rounded-lg p-4 relative" data-testid="bar-chart-container">
                     {/* Y-axis title for bar chart */}
                     <div 
                       className="absolute"
@@ -703,7 +712,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                       {yAxisLabel}
                     </div>
                     
-                    <ResponsiveContainer width="100%" height="100%" minWidth={800} data-testid="bar-chart-container" className="recharts-responsive-container">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={800} className="recharts-responsive-container">
                       <BarChart data={barChartData.data}
                         margin={{ top: 60, right: 80, left: 80, bottom: 120 }}
                         data-testid="bar-chart-svg"

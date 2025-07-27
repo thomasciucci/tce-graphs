@@ -81,7 +81,7 @@ function generatePrismXML(options: PrismExportOptions): string {
 </InfoSequence>
 <Info ID="Info0">
 <Title>Dose Response Analysis Export</Title>
-<Notes>Exported from iDose Studio
+<Notes>Exported from nVitro Studio
 Export Type: ${exportType}
 Date: ${new Date().toISOString()}
 </Notes>

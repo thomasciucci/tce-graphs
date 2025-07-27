@@ -2,7 +2,7 @@
   "name": "dose-response-analyzer",
   "version": "1.0.0",
   "private": true,
-  "description": "TCE Dose-Response Analysis Tool - Professional curve fitting and data analysis for biological assays",
+  "description": "nVitro Studio - Professional dose-response analysis tool for biological assays",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",

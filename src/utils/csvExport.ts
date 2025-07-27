@@ -224,7 +224,7 @@ async function exportPrismInstructions(
   let content = `GRAPHPAD PRISM ANALYSIS INSTRUCTIONS
 =====================================
 
-Generated from iDose Studio dose-response analysis
+Generated from nVitro Studio dose-response analysis
 
 STEP-BY-STEP ANALYSIS IN PRISM:
 ==============================

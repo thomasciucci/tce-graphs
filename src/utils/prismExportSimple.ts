@@ -19,7 +19,7 @@ function generateSimplePrismXML(options: SimplePrismExportOptions): string {
 <Ref ID="Info0" Selected="1"/>
 </InfoSequence>
 <Info ID="Info0">
-<Title>Dose Response Analysis from iDose Studio</Title>
+<Title>Dose Response Analysis from nVitro Studio</Title>
 <Notes>INSTRUCTIONS FOR ANALYSIS:
 1. Select the data table
 2. Go to Analyze → Nonlinear regression (curve fit)  
@@ -29,7 +29,7 @@ function generateSimplePrismXML(options: SimplePrismExportOptions): string {
 Data format: Log₁₀[Concentration in M] vs Response
 Recommended equation: Y = Bottom + (Top-Bottom)/(1+10^((LogEC50-X)*HillSlope))
 
-Original data from iDose Studio with fitted curve parameters available.</Notes>
+Original data from nVitro Studio with fitted curve parameters available.</Notes>
 </Info>
 <TableSequence>
 `;
