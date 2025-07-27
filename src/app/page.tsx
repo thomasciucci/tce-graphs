@@ -7,6 +7,13 @@ import CurveFitter from '../components/CurveFitter';
 import ResultsDisplay from '../components/ResultsDisplay';
 import { exportToPDF, captureChartImage } from '../utils/pdfExport';
 import PrismExportModal from '../components/PrismExportModal';
+import dynamic from 'next/dynamic';
+
+// Dynamic import for PowerPoint export component with no SSR
+const PowerPointExport = dynamic(() => import('../components/PowerPointExport'), {
+  ssr: false,
+  loading: () => <div className="px-6 py-3 bg-gray-200 rounded-lg">Loading...</div>
+});
 
 import { DataPoint, FittedCurve, Dataset } from '../types';
 import { fitCurvesForData } from '../fitUtils';
@@ -1001,7 +1008,7 @@ export default function Home() {
               <div className="bg-white p-6 rounded-lg shadow mb-6">
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Export Results</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <button
                       onClick={handleExportPDF}
                       disabled={isExportingPDF}
@@ -1028,6 +1035,24 @@ export default function Home() {
                         </div>
                       )}
                     </button>
+                    
+                    <PowerPointExport
+                      datasets={datasets}
+                      fittedCurvesByDataset={fittedCurvesByDataset}
+                      originalDataByDataset={originalDataByDataset}
+                      editedDataByDataset={editedDataByDataset}
+                      curveColorsByDataset={curveColorsByDataset}
+                      curveVisibilityByDataset={curveVisibilityByDataset}
+                      globalChartSettings={globalChartSettings}
+                      assayType={datasets[activeDatasetIndex]?.assayType}
+                      data={data}
+                      fittedCurves={fittedCurves}
+                      curveColors={curveColors}
+                      activeDatasetIndex={activeDatasetIndex}
+                      hasResults={hasResults}
+                      onDatasetSwitch={datasets.length > 1 ? handleSwitchDataset : undefined}
+                      onCurveVisibilityChange={handleCurveVisibilityChangeForPDF}
+                    />
                     
                     <button
                       onClick={() => setShowPrismExportModal(true)}
