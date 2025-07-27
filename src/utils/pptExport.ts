@@ -74,29 +74,41 @@ export async function exportToPowerPoint(options: PPTExportOptions): Promise<voi
         console.log(`Switching to dataset ${i}: ${dataset.name}`);
         await onDatasetSwitch(i);
         
-        // Wait for UI to update
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Wait longer for UI to update and render charts
+        console.log('Waiting for UI to update...');
+        await new Promise(resolve => setTimeout(resolve, 2500));
         
         // Try to capture charts (import dynamically to avoid build issues)
         try {
           const { captureChartImage } = await import('./pdfExport');
           
-          // Capture bar chart if enabled
-          if (globalChartSettings?.showBarChart) {
-            const barCapturedImage = await captureChartImage('bar');
-            if (barCapturedImage) {
-              barChartImage = barCapturedImage;
-            }
+          // Capture curve chart first
+          console.log('Attempting to capture curve chart...');
+          const capturedImage = await captureChartImage('curve');
+          if (capturedImage && capturedImage.length > 100) {
+            datasetChartImage = capturedImage;
+            console.log('Curve chart captured successfully, length:', capturedImage.length);
+          } else {
+            console.warn('Curve chart capture failed or returned empty data');
           }
           
-          // Capture curve chart
-          const capturedImage = await captureChartImage();
-          if (capturedImage) {
-            datasetChartImage = capturedImage;
+          // Capture bar chart if enabled
+          if (globalChartSettings?.showBarChart) {
+            console.log('Attempting to capture bar chart...');
+            await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause between captures
+            const barCapturedImage = await captureChartImage('bar');
+            if (barCapturedImage && barCapturedImage.length > 100) {
+              barChartImage = barCapturedImage;
+              console.log('Bar chart captured successfully, length:', barCapturedImage.length);
+            } else {
+              console.warn('Bar chart capture failed or returned empty data');
+            }
           }
         } catch (captureError) {
-          console.warn('Chart capture failed:', captureError);
+          console.error('Chart capture failed:', captureError);
         }
+      } else {
+        console.log('No dataset switch callback provided, skipping chart capture');
       }
 
       // Add dataset overview slide
@@ -126,13 +138,19 @@ export async function exportToPowerPoint(options: PPTExportOptions): Promise<voi
       }
       
       // Add chart visualization slide
-      if (datasetChartImage) {
+      if (datasetChartImage && datasetChartImage.length > 100) {
+        console.log(`Adding chart visualization slide for dataset ${i + 1}`);
         addChartVisualizationSlide(pres, dataset, datasetChartImage, i + 1);
+      } else {
+        console.log(`Skipping chart visualization slide for dataset ${i + 1} - no valid chart image`);
       }
       
       // Add bar chart slide if available
-      if (barChartImage) {
+      if (barChartImage && barChartImage.length > 100) {
+        console.log(`Adding bar chart slide for dataset ${i + 1}`);
         addBarChartSlide(pres, dataset, barChartImage, i + 1);
+      } else {
+        console.log(`Skipping bar chart slide for dataset ${i + 1} - no valid chart image`);
       }
     }
     
@@ -283,12 +301,23 @@ function addDatasetOverviewSlide(
     x: 0.5, y: 1.2, w: 4.5, h: 2
   });
   
-  if (chartImage) {
-    const base64Data = chartImage.replace(/^data:image\/[a-z]+;base64,/, '');
-    slide.addImage({
-      data: base64Data,
-      x: 5.2, y: 1.2, w: 4.3, h: 3.2
-    });
+  if (chartImage && chartImage.trim() !== '') {
+    try {
+      // Ensure we have a valid base64 data URL
+      if (chartImage.startsWith('data:image/')) {
+        console.log('Adding chart image to slide, data length:', chartImage.length);
+        slide.addImage({
+          data: chartImage, // Use full data URL for PptxGenJS
+          x: 5.2, y: 1.2, w: 4.3, h: 3.2
+        });
+      } else {
+        console.warn('Invalid chart image format:', chartImage.substring(0, 50));
+      }
+    } catch (imageError) {
+      console.error('Failed to add chart image to slide:', imageError);
+    }
+  } else {
+    console.log('No chart image available for this slide');
   }
 }
 
@@ -415,11 +444,19 @@ function addChartVisualizationSlide(pres: any, dataset: Dataset, chartImage: str
     color: '8A0051'
   });
   
-  const base64Data = chartImage.replace(/^data:image\/[a-z]+;base64,/, '');
-  slide.addImage({
-    data: base64Data,
-    x: 2.5, y: 1.2, w: 5, h: 3.5
-  });
+  try {
+    if (chartImage.startsWith('data:image/')) {
+      console.log('Adding chart visualization to slide, data length:', chartImage.length);
+      slide.addImage({
+        data: chartImage, // Use full data URL
+        x: 2.5, y: 1.2, w: 5, h: 3.5
+      });
+    } else {
+      console.warn('Invalid chart image format for visualization slide');
+    }
+  } catch (imageError) {
+    console.error('Failed to add chart visualization:', imageError);
+  }
 }
 
 
@@ -439,9 +476,17 @@ function addBarChartSlide(pres: any, dataset: Dataset, barChartImage: string, da
     color: '666666'
   });
   
-  const base64Data = barChartImage.replace(/^data:image\/[a-z]+;base64,/, '');
-  slide.addImage({
-    data: base64Data,
-    x: 1.5, y: 1.4, w: 7, h: 3.8
-  });
+  try {
+    if (barChartImage.startsWith('data:image/')) {
+      console.log('Adding bar chart to slide, data length:', barChartImage.length);
+      slide.addImage({
+        data: barChartImage, // Use full data URL
+        x: 1.5, y: 1.4, w: 7, h: 3.8
+      });
+    } else {
+      console.warn('Invalid bar chart image format');
+    }
+  } catch (imageError) {
+    console.error('Failed to add bar chart:', imageError);
+  }
 }
