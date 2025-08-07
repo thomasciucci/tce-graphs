@@ -1,15 +1,18 @@
-# Four-Parameter Logistic Curve Fitter
+# nVitro Studio
 
-A web application for analyzing concentration-response data using the four-parameter logistic equation. This tool automatically fits curves to experimental data and provides statistical summaries and visualizations.
+Professional dose-response analysis tool for biological assays. A Next.js-based web application for analyzing and visualizing dose-response curves with comprehensive export capabilities.
 
 ## Features
 
-- **Excel File Upload**: Supports .xls and .xlsx files
-- **Data Editing**: Inline editing capabilities for uploaded data
-- **Automatic Curve Fitting**: Uses the four-parameter logistic equation with optimized parameters
-- **Interactive Charts**: Concentration-response curves with original data points and fitted curves
-- **Statistical Summaries**: EC50, Hill Slope, and R² values for each sample
-- **Real-time Processing**: Immediate results display
+- **Data Import**: Support for Excel files (.xls, .xlsx) with automatic data parsing
+- **Dose-Response Analysis**: Four-parameter logistic regression curve fitting
+- **Visualization**: Interactive charts with customizable display options
+- **Export Options**: 
+  - PDF reports with charts and statistical summaries
+  - PowerPoint presentations with formatted slides
+  - Prism-compatible data files
+- **Technical Replicates**: Built-in support for replicate grouping and averaging
+- **Multi-Dataset Support**: Analyze multiple datasets with comparison capabilities
 
 ## Four-Parameter Logistic Equation
 
@@ -27,60 +30,102 @@ Where:
 - **EC50**: Concentration producing 50% of maximum response
 - **HillSlope**: Steepness of the curve
 
+## Quick Start
+
+### Prerequisites
+
+- Node.js 18+ 
+- npm or yarn
+
+### Installation
+
+```bash
+# Clone the repository
+git clone [repository-url]
+cd tce-graphs
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to view the application.
+
+### Sample Data
+
+Sample datasets are included in the `Sample Data/` directory:
+- `Table1_cytotoxicity.xls` - Cytotoxicity assay example
+- `Table2_activation.xls` - Cell activation assay example
+
+## Basic Usage
+
+1. **Upload Data**: Drag and drop Excel files or use the file picker
+2. **Configure Dataset**: Set column names and replicate groups if applicable
+3. **Fit Curves**: Click "Calculate Results" to perform curve fitting
+4. **Visualize**: View dose-response curves with statistical parameters
+5. **Export**: Generate PDF reports, PowerPoint slides, or Prism files
+
+## Core Technologies
+
+- **Framework**: Next.js 15 with React 19
+- **Styling**: Tailwind CSS
+- **Charts**: Recharts for data visualization
+- **File Processing**: XLSX for Excel file parsing
+- **PDF Generation**: jsPDF with html2canvas for chart capture
+- **UI Components**: Headless UI for accessible components
+
+## Project Structure
+
+```
+src/
+├── app/                    # Next.js app directory
+│   ├── layout.tsx         # Root layout
+│   └── page.tsx           # Main application page
+├── components/            # React components
+│   ├── CurveFitter.tsx    # Curve fitting interface
+│   ├── DataEditor.tsx     # Data editing interface
+│   ├── FileUpload.tsx     # File upload component
+│   ├── ResultsDisplay.tsx # Chart and results display
+│   └── PowerPointExport.tsx # PowerPoint export functionality
+├── utils/                 # Utility functions
+│   ├── csvExport.ts       # CSV export utilities
+│   ├── pdfExport.ts       # PDF generation
+│   ├── pptExport.ts       # PowerPoint generation
+│   └── prismExport.ts     # Prism format export
+├── fitUtils.ts            # Curve fitting algorithms
+└── types.ts               # TypeScript type definitions
+```
+
 ## Data Format
 
-Upload Excel files with the following structure:
-- **First column**: Concentration values (nM)
-- **Additional columns**: Response values for each sample
-- **First row**: Sample names (headers)
+The application expects Excel files with:
+- First column: Concentration values (numeric)
+- Subsequent columns: Response values for each sample
+- Optional: Technical replicates can be grouped
 
 Example:
 ```
-TCE [nM] | TCE1 | TCE2 | TCE3
-50        | 13.9 | 89.3 | 94.9
-10        | 21.9 | 90.7 | 94.0
-2         | 11.6 | 92.5 | 95.5
+Concentration | Sample A | Sample B | Sample C
+0.1          | 10.2     | 12.1     | 9.8
+1.0          | 25.4     | 28.2     | 24.9
+10.0         | 67.3     | 71.2     | 69.1
 ```
 
-## Installation
+## Scripts
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+```bash
+npm run dev          # Start development server with Turbopack
+npm run build        # Build for production
+npm run start        # Start production server
+npm run lint         # Run ESLint
+```
 
-## Usage
+## License
 
-1. **Upload Data**: Click "Choose Excel File" and select your concentration-response data
-2. **Edit Data** (optional): Use the data editor to modify values or add/remove rows
-3. **Fit Curves**: Click "Fit Curves" to automatically calculate parameters
-4. **View Results**: Examine the fitted curves, statistical summaries, and processed data
+Private project - All rights reserved
 
-## Technical Details
+## Support
 
-- **Frontend**: Next.js with React and TypeScript
-- **Charts**: Recharts library for data visualization
-- **Excel Processing**: xlsx library for file parsing
-- **Styling**: Tailwind CSS for responsive design
-- **Curve Fitting**: Grid search algorithm for parameter optimization
-
-## Output
-
-The application provides:
-- **Summary Statistics**: EC50, Hill Slope, R², Top, and Bottom values for each sample
-- **Concentration-Response Curves**: Interactive charts showing original data points and fitted curves
-- **Processed Data Table**: Formatted data with calculated values
-
-## Sample Data
-
-The application includes sample data files in the `Sample Data/` directory:
-- `Table1_cytotoxicity.xls` - Cytotoxicity data
-- `Table2_activation.xls` - Activation data
-
-These files demonstrate the expected data format and can be used to test the application.
+For issues and feature requests, please refer to the project documentation or contact the development team.
