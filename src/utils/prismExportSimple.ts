@@ -68,13 +68,13 @@ function generateSimpleXYTable(tableId: string, title: string, data: DataPoint[]
 
   const sampleNames = data[0].sampleNames || [];
   
-  let xml = `<Table ID="${tableId}" XFormat="log" YFormat="replicates" Replicates="1" TableType="XY" EVFormat="AsteriskAfterNumber">
+  let xml = `<Table ID="${tableId}" XFormat="log10" YFormat="replicates" Replicates="1" TableType="XY" EVFormat="AsteriskAfterNumber">
 <Title>${escapeXML(title)} - Dose Response Data</Title>
 <RowTitlesColumn Width="81">
 <Title/>
 </RowTitlesColumn>
 <ColumnTitlesRow>
-<d>Log[Concentration] (M)</d>
+<d>Concentration</d>
 `;
 
   sampleNames.forEach(name => {
@@ -84,16 +84,15 @@ function generateSimpleXYTable(tableId: string, title: string, data: DataPoint[]
   xml += `</ColumnTitlesRow>
 `;
 
-  // X Column (log concentrations for dose-response)
+  // X Column (concentrations for dose-response)
   xml += `<XColumn Width="81" Decimals="3" Subcolumns="1">
-<Title>Log[Concentration] (M)</Title>
+<Title>Concentration</Title>
 <Subcolumn>
 `;
   data.forEach(row => {
-    // Convert concentration from nM to M and take log10
-    const concentrationM = row.concentration * 1e-9; // nM to M
-    const logConcentration = Math.log10(concentrationM);
-    xml += `<d>${logConcentration.toFixed(3)}</d>\n`;
+    // Use concentration directly (already in appropriate units for dose-response)
+    // No log transformation needed - Prism will handle this based on XFormat
+    xml += `<d>${row.concentration}</d>\n`;
   });
   xml += `</Subcolumn>
 </XColumn>

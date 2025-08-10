@@ -5,6 +5,8 @@ import { Dialog } from '@headlessui/react';
 import { DataPoint, Dataset, FittedCurve } from '../types';
 import { getPrismExportOptions } from '../utils/prismExport';
 import { exportToSimplePrism, SimplePrismExportOptions } from '../utils/prismExportSimple';
+import { exportToEnhancedPrism, EnhancedPrismExportOptions } from '../utils/enhancedPrismExport';
+import { exportWorkingPrism, WorkingPrismExportOptions } from '../utils/workingPrismExport';
 import { exportToCSV, CSVExportOptions } from '../utils/csvExport';
 
 interface PrismExportModalProps {
@@ -26,15 +28,16 @@ export default function PrismExportModal({
   datasets,
   fittedCurves,
   fittedCurvesByDataset,
-  originalDataByDataset: _originalDataByDataset, // eslint-disable-line @typescript-eslint/no-unused-vars
+  originalDataByDataset: _originalDataByDataset,  
   editedDataByDataset,
-  curveColorsByDataset: _curveColorsByDataset, // eslint-disable-line @typescript-eslint/no-unused-vars
+  curveColorsByDataset: _curveColorsByDataset,  
   currentData,
   hasReplicates
 }: PrismExportModalProps) {
   const [selectedExportType, setSelectedExportType] = useState<string>('');
-  const [selectedFormat, setSelectedFormat] = useState<'csv' | 'pzfx'>('csv');
+  const [selectedFormat, setSelectedFormat] = useState<'csv' | 'pzfx' | 'enhanced-pzfx' | 'working-pzfx'>('working-pzfx');
   const [includeAnalysis, setIncludeAnalysis] = useState<boolean>(true);
+  const [includeGraphs, setIncludeGraphs] = useState<boolean>(true);
   const [isExporting, setIsExporting] = useState(false);
 
   // Determine available export options
@@ -44,7 +47,7 @@ export default function PrismExportModal({
 
   // Set default export type when modal opens
   React.useEffect(() => {
-    if (isOpen && availableOptions.length > 0 && !selectedExportType) {
+    if (isOpen && availableOptions.options.length > 0 && !selectedExportType) {
       if (hasReplicates) {
         setSelectedExportType('with_replicates_mean');
       } else {
@@ -95,15 +98,45 @@ export default function PrismExportModal({
 
       const baseEditedData = datasets.length > 0 ? editedDataByDataset : { 'single': currentData };
 
-      if (selectedFormat === 'csv') {
-        // Export as CSV (recommended)
-        // Fix: Ensure fitted curves are available for single dataset mode
-        const finalFittedCurves = datasets.length > 0 
-          ? fittedCurvesByDataset 
-          : { 'single': fittedCurves };
+      // Fix: Ensure fitted curves are available for single dataset mode
+      const finalFittedCurves = datasets.length > 0 
+        ? fittedCurvesByDataset 
+        : { 'single': fittedCurves };
+      
+      console.log('Final fitted curves for export:', finalFittedCurves);
+
+      if (selectedFormat === 'working-pzfx') {
+        // Export using WORKING Prism format (default)
+        const workingExportOptions: WorkingPrismExportOptions = {
+          datasets: baseDatasets,
+          editedDataByDataset: baseEditedData,
+          fittedCurvesByDataset: finalFittedCurves
+        };
         
-        console.log('Final fitted curves for export:', finalFittedCurves);
+        await exportWorkingPrism(workingExportOptions);
         
+        // Show success message with instructions
+        alert(`✅ Prism file exported successfully!
+
+📊 To analyze your data in GraphPad Prism:
+
+1. Open the exported .pzfx file in GraphPad Prism
+2. Select your data table
+3. Click the "Analyze" button
+4. Choose "XY analyses" → "Nonlinear regression (curve fit)"
+5. In "Dose-response - Stimulation" section, select:
+   "log(agonist) vs. response -- Variable slope (four parameters)"
+6. Click OK
+
+Your results will include:
+• EC50 value
+• Hill Slope
+• Top and Bottom plateaus
+• R² (goodness of fit)
+• Confidence intervals`);
+        
+      } else if (selectedFormat === 'csv') {
+        // Export as CSV
         const csvOptions: CSVExportOptions = {
           datasets: baseDatasets,
           editedDataByDataset: baseEditedData,
@@ -113,8 +146,21 @@ export default function PrismExportModal({
         };
 
         await exportToCSV(csvOptions);
+      } else if (selectedFormat === 'enhanced-pzfx') {
+        // Export as Enhanced PZFX (experimental)
+        const enhancedExportOptions: EnhancedPrismExportOptions = {
+          datasets: baseDatasets,
+          editedDataByDataset: baseEditedData,
+          fittedCurvesByDataset: finalFittedCurves,
+          exportType: selectedExportType as 'raw_and_edited' | 'with_replicates_mean' | 'with_replicates_individual',
+          includeAnalysis: includeAnalysis,
+          includeGraphs: includeGraphs
+        };
+
+        const result = await exportToEnhancedPrism(enhancedExportOptions);
+        console.log('Enhanced Prism export result:', result);
       } else {
-        // Export as PZFX (experimental)
+        // Export as Simple PZFX (legacy)
         const simpleExportOptions: SimplePrismExportOptions = {
           datasets: baseDatasets,
           editedDataByDataset: baseEditedData,
@@ -144,9 +190,9 @@ export default function PrismExportModal({
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <Dialog.Panel className="mx-auto max-w-lg rounded-lg bg-white p-6 shadow-xl">
           <Dialog.Title className="text-lg font-medium leading-6 text-gray-900 mb-4">
-            Export Data for GraphPad Prism
-            <span className="ml-2 px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-md">
-              🚧 Under Construction
+            Export to GraphPad Prism
+            <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-md">
+              ✅ Compatible Format
             </span>
           </Dialog.Title>
 
@@ -172,57 +218,106 @@ export default function PrismExportModal({
             {/* Format Selection */}
             <div className="mb-6 p-4 bg-gray-50 rounded-lg">
               <h4 className="font-medium text-gray-900 mb-3">Export Format:</h4>
-              <div className="space-y-2">
-                <label className="flex items-center">
+              <div className="space-y-3">
+                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
+                  <input
+                    type="radio"
+                    name="format"
+                    value="working-pzfx"
+                    checked={selectedFormat === 'working-pzfx'}
+                    onChange={(e) => setSelectedFormat(e.target.value as 'working-pzfx')}
+                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
+                  />
+                  <div>
+                    <span className="font-medium text-green-700">✅ Standard Prism Format (Recommended)</span>
+                    <p className="text-sm text-gray-600">Clean data table ready for dose-response analysis in Prism</p>
+                  </div>
+                </label>
+                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
+                  <input
+                    type="radio"
+                    name="format"
+                    value="enhanced-pzfx"
+                    checked={selectedFormat === 'enhanced-pzfx'}
+                    onChange={(e) => setSelectedFormat(e.target.value as 'enhanced-pzfx')}
+                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
+                  />
+                  <div>
+                    <span className="font-medium text-blue-700">🚀 Enhanced Project (Experimental)</span>
+                    <p className="text-sm text-gray-600">Attempts to include analysis - may not work in all Prism versions</p>
+                  </div>
+                </label>
+                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
                   <input
                     type="radio"
                     name="format"
                     value="csv"
                     checked={selectedFormat === 'csv'}
                     onChange={(e) => setSelectedFormat(e.target.value as 'csv')}
-                    className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
+                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
                   />
                   <div>
-                    <span className="font-medium text-green-700">CSV Format (Recommended)</span>
-                    <p className="text-sm text-gray-600">Easy to import into Prism with proper formatting</p>
+                    <span className="font-medium text-green-700">CSV Format</span>
+                    <p className="text-sm text-gray-600">Simple data export for manual import into Prism</p>
                   </div>
                 </label>
-                <label className="flex items-center">
+                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
                   <input
                     type="radio"
                     name="format"
                     value="pzfx"
                     checked={selectedFormat === 'pzfx'}
                     onChange={(e) => setSelectedFormat(e.target.value as 'pzfx')}
-                    className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
+                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
                   />
                   <div>
-                    <span className="font-medium text-orange-700">PZFX Format (Enhanced)</span>
-                    <p className="text-sm text-gray-600">Complete Prism project with embedded nonlinear regression analysis and graphs</p>
+                    <span className="font-medium text-orange-700">Basic PZFX (Data Only)</span>
+                    <p className="text-sm text-gray-600">Raw data export without analysis results</p>
                   </div>
                 </label>
               </div>
             </div>
 
-            {/* Analysis inclusion option */}
-            <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-              <h4 className="font-medium text-gray-900 mb-3">Include Downstream Analysis:</h4>
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={includeAnalysis}
-                  onChange={(e) => setIncludeAnalysis(e.target.checked)}
-                  className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
-                />
-                <div>
-                  <span className="font-medium">Export analysis with instructions</span>
-                  <p className="text-sm text-gray-600">
-                    Creates 3 files: Prism import data, analysis results, and step-by-step Prism instructions
-                  </p>
+            {/* Enhanced options for PZFX export */}
+            {(selectedFormat === 'enhanced-pzfx' || selectedFormat === 'csv') && (
+              <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-3">Export Options:</h4>
+                <div className="space-y-2">
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={includeAnalysis}
+                      onChange={(e) => setIncludeAnalysis(e.target.checked)}
+                      className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
+                    />
+                    <div>
+                      <span className="font-medium">Include Curve Fitting Results</span>
+                      <p className="text-sm text-gray-600">
+                        Export fitted parameters (EC50, Hill slope, R²) and theoretical curves
+                      </p>
+                    </div>
+                  </label>
+                  {selectedFormat === 'enhanced-pzfx' && (
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={includeGraphs}
+                        onChange={(e) => setIncludeGraphs(e.target.checked)}
+                        className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
+                      />
+                      <div>
+                        <span className="font-medium">Include Publication-Ready Graphs</span>
+                        <p className="text-sm text-gray-600">
+                          Pre-configured dose-response graphs with professional formatting
+                        </p>
+                      </div>
+                    </label>
+                  )}
                 </div>
-              </label>
-            </div>
+              </div>
+            )}
 
+            {selectedFormat !== 'working-pzfx' && (
             <div className="space-y-3">
               {exportOptions.map((option) => (
                 <label
@@ -248,6 +343,7 @@ export default function PrismExportModal({
                 </label>
               ))}
             </div>
+            )}
           </div>
 
           {/* Preview of what will be exported */}
@@ -262,13 +358,24 @@ export default function PrismExportModal({
                   <div>• <strong>Fitted curve points</strong> for graphing in Prism</div>
                 </>
               )}
-              {selectedFormat === 'csv' ? (
-                <div>• CSV format - easy to import into Prism</div>
-              ) : (
+              {selectedFormat === 'working-pzfx' ? (
                 <div>
-                  • PZFX format - complete project with pre-configured dose-response analysis
-                  <br />• Includes nonlinear regression setup and graph templates
+                  • <strong>Standard Prism format (.pzfx)</strong> - guaranteed compatibility
+                  <br />• Clean XY data table ready for analysis
+                  <br />• Proper concentration and response columns
+                  <br />• Instructions included for running dose-response analysis
                 </div>
+              ) : selectedFormat === 'enhanced-pzfx' ? (
+                <div>
+                  • <strong>Enhanced Prism project (.pzfx)</strong> - experimental features
+                  <br />• Attempts to include fitted curves and parameters
+                  <br />• May require manual adjustments in some Prism versions
+                  {includeGraphs && <><br />• Graph templates included</>}
+                </div>
+              ) : selectedFormat === 'csv' ? (
+                <div>• CSV format - requires manual import and setup in Prism</div>
+              ) : (
+                <div>• Basic PZFX format - minimal data export</div>
               )}
             </div>
           </div>
