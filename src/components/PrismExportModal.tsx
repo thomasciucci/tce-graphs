@@ -7,6 +7,8 @@ import { getPrismExportOptions } from '../utils/prismExport';
 import { exportToSimplePrism, SimplePrismExportOptions } from '../utils/prismExportSimple';
 import { exportToEnhancedPrism, EnhancedPrismExportOptions } from '../utils/enhancedPrismExport';
 import { exportWorkingPrism, WorkingPrismExportOptions } from '../utils/workingPrismExport';
+import { exportPrismAnalysisZip, ZipExportOptions } from '../utils/prismZipExport';
+import { exportCompletePrism, CompleteExportOptions } from '../utils/prismCompleteExport';
 import { exportToCSV, CSVExportOptions } from '../utils/csvExport';
 
 interface PrismExportModalProps {
@@ -35,7 +37,7 @@ export default function PrismExportModal({
   hasReplicates
 }: PrismExportModalProps) {
   const [selectedExportType, setSelectedExportType] = useState<string>('');
-  const [selectedFormat, setSelectedFormat] = useState<'csv' | 'pzfx' | 'enhanced-pzfx' | 'working-pzfx'>('working-pzfx');
+  const [selectedFormat, setSelectedFormat] = useState<'csv' | 'pzfx' | 'enhanced-pzfx' | 'working-pzfx' | 'complete-zip'>('complete-zip');
   const [includeAnalysis, setIncludeAnalysis] = useState<boolean>(true);
   const [includeGraphs, setIncludeGraphs] = useState<boolean>(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -105,7 +107,17 @@ export default function PrismExportModal({
       
       console.log('Final fitted curves for export:', finalFittedCurves);
 
-      if (selectedFormat === 'working-pzfx') {
+      if (selectedFormat === 'complete-zip') {
+        // Export complete analysis package as ZIP
+        const zipExportOptions: ZipExportOptions = {
+          datasets: baseDatasets,
+          editedDataByDataset: baseEditedData,
+          fittedCurvesByDataset: finalFittedCurves
+        };
+        
+        await exportPrismAnalysisZip(zipExportOptions);
+        
+      } else if (selectedFormat === 'working-pzfx') {
         // Export using WORKING Prism format (default)
         const workingExportOptions: WorkingPrismExportOptions = {
           datasets: baseDatasets,
@@ -223,14 +235,28 @@ Your results will include:
                   <input
                     type="radio"
                     name="format"
+                    value="complete-zip"
+                    checked={selectedFormat === 'complete-zip'}
+                    onChange={(e) => setSelectedFormat(e.target.value as 'complete-zip')}
+                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
+                  />
+                  <div>
+                    <span className="font-medium text-purple-700">🎯 Complete Analysis Package (Recommended)</span>
+                    <p className="text-sm text-gray-600">ZIP file with data, analysis results, fitted curves, and detailed instructions</p>
+                  </div>
+                </label>
+                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
+                  <input
+                    type="radio"
+                    name="format"
                     value="working-pzfx"
                     checked={selectedFormat === 'working-pzfx'}
                     onChange={(e) => setSelectedFormat(e.target.value as 'working-pzfx')}
                     className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
                   />
                   <div>
-                    <span className="font-medium text-green-700">✅ Standard Prism Format (Recommended)</span>
-                    <p className="text-sm text-gray-600">Clean data table ready for dose-response analysis in Prism</p>
+                    <span className="font-medium text-green-700">✅ Standard Prism Format</span>
+                    <p className="text-sm text-gray-600">Clean data table only - requires manual analysis setup</p>
                   </div>
                 </label>
                 <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
@@ -317,7 +343,7 @@ Your results will include:
               </div>
             )}
 
-            {selectedFormat !== 'working-pzfx' && (
+            {selectedFormat !== 'working-pzfx' && selectedFormat !== 'complete-zip' && (
             <div className="space-y-3">
               {exportOptions.map((option) => (
                 <label
@@ -358,7 +384,16 @@ Your results will include:
                   <div>• <strong>Fitted curve points</strong> for graphing in Prism</div>
                 </>
               )}
-              {selectedFormat === 'working-pzfx' ? (
+              {selectedFormat === 'complete-zip' ? (
+                <div>
+                  • <strong>Complete analysis package (.zip)</strong> - everything you need!
+                  <br />• Clean Prism data file (.pzfx) 
+                  <br />• Your fitted parameters from nVitro Studio (.txt)
+                  <br />• Theoretical curve data (.csv)
+                  <br />• Step-by-step analysis script
+                  <br />• Detailed README with instructions
+                </div>
+              ) : selectedFormat === 'working-pzfx' ? (
                 <div>
                   • <strong>Standard Prism format (.pzfx)</strong> - guaranteed compatibility
                   <br />• Clean XY data table ready for analysis
