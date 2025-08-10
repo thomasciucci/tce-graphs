@@ -10,7 +10,10 @@ Professional dose-response analysis tool for biological assays. A Next.js-based 
 - **Export Options**: 
   - PDF reports with charts and statistical summaries
   - PowerPoint presentations with formatted slides
-  - Prism-compatible data files
+  - **GraphPad Prism Export**: Template-based export with analysis preservation
+    - Built-in dose-response templates (supports 1-3 datasets, 6 samples each)
+    - Custom template upload (.pzfx files)
+    - Preserves all analysis settings and graph configurations
 - **Technical Replicates**: Built-in support for replicate grouping and averaging
 - **Multi-Dataset Support**: Analyze multiple datasets with comparison capabilities
 
@@ -93,10 +96,28 @@ src/
 │   ├── csvExport.ts       # CSV export utilities
 │   ├── pdfExport.ts       # PDF generation
 │   ├── pptExport.ts       # PowerPoint generation
-│   └── prismExport.ts     # Prism format export
+│   ├── prismExport.ts     # Basic Prism data export
+│   └── actualTemplateExport.ts # Template-based Prism export
 ├── fitUtils.ts            # Curve fitting algorithms
 └── types.ts               # TypeScript type definitions
 ```
+
+## Recent Updates
+
+### Prism Export Enhancement (Latest)
+- **Simplified UI**: Reduced from 6 complex options to 2 clean choices
+- **Template-Based Export**: 
+  - Built-in dose-response templates (1-3 datasets, 6 samples each)
+  - Custom template upload (.pzfx files)
+  - Preserves all analysis settings and graph configurations
+- **Fixed Multi-Dataset Support**: Now exports all datasets and all columns correctly
+- **Custom Template Upload**: Users can upload their own Prism template files
+
+### Next Development Priorities
+1. Template library expansion (IC50, competitive binding, time-course)
+2. Template validation and compatibility checking
+3. Enhanced user experience (preview, progress indicators)
+4. Comprehensive testing with various dataset configurations
 
 ## Data Format
 

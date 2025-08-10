@@ -32,7 +32,8 @@ src/
 │   ├── pdfExport.ts       # PDF generation
 │   ├── pptExport.ts       # PowerPoint generation
 │   ├── prismExport.ts     # Prism format export
-│   └── prismExportSimple.ts
+│   ├── prismExportSimple.ts # Basic Prism data export
+│   └── actualTemplateExport.ts # Template-based Prism export
 ├── fitUtils.ts            # Core curve fitting algorithms
 └── types.ts               # TypeScript type definitions
 ```
@@ -58,7 +59,8 @@ src/
 - Large main page component (1000+ lines) - could benefit from refactoring
 - Complex state management with multiple dataset tracking
 - Client-side only processing (no backend)
-- Recent focus on PowerPoint and PDF export improvements
+- **Recent Progress**: Simplified Prism export UI to 2 clean options
+- **Template-Based Export**: Supports built-in templates + custom template upload
 - Uses advanced React patterns (forwardRef, useMemo, useCallback)
 - Comprehensive error handling for file operations
 
@@ -74,6 +76,47 @@ src/
 - Export functionality is in `utils/` directory
 - Chart modifications are in `ResultsDisplay.tsx`
 - Main application logic is in `app/page.tsx`
+- **Prism Export**: `PrismExportModal.tsx` + `actualTemplateExport.ts`
+
+## Recent Progress (Prism Export Enhancement)
+
+### ✅ COMPLETED TASKS:
+1. **Simplified Prism Export UI**
+   - Reduced from 6 complex options to 2 clean options
+   - Template-Based Export (Recommended) vs Basic Data Export
+   - Fixed all runtime errors in PrismExportModal
+
+2. **Fixed Template-Based Export**
+   - Now supports all 3 datasets (not just first dataset)
+   - Processes all 6 Y columns per table (not just first 3)
+   - Template file: `/public/templates/Test_template.pzfx`
+   - Key function: `replaceDataInActualTemplate()` in `actualTemplateExport.ts`
+
+3. **Custom Template Upload**
+   - Users can upload their own .pzfx template files
+   - Data replacement preserves all analysis settings
+   - File validation and error handling
+
+### 🔄 NEXT PRIORITIES:
+1. **Test Multi-Dataset Export**
+   - Verify 1-3 datasets export correctly to template tables
+   - Test edge cases (missing data, different sample counts)
+
+2. **Template Library Development**
+   - IC50/EC50 templates for different experimental designs
+   - Competitive binding assay templates
+   - Time-course analysis templates
+   - Multi-parameter screening templates
+
+3. **Template Validation**
+   - Check template structure before data replacement
+   - Validate table/column compatibility
+   - Better error messages for incompatible templates
+
+4. **User Experience**
+   - Template preview functionality
+   - Progress indicators for large exports
+   - Better success/error messaging
 
 ## Workflow Modes (Current)
 The application now supports two main workflow modes:

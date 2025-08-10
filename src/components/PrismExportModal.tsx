@@ -5,11 +5,7 @@ import { Dialog } from '@headlessui/react';
 import { DataPoint, Dataset, FittedCurve } from '../types';
 import { getPrismExportOptions } from '../utils/prismExport';
 import { exportToSimplePrism, SimplePrismExportOptions } from '../utils/prismExportSimple';
-import { exportToEnhancedPrism, EnhancedPrismExportOptions } from '../utils/enhancedPrismExport';
-import { exportWorkingPrism, WorkingPrismExportOptions } from '../utils/workingPrismExport';
-import { exportPrismAnalysisZip, ZipExportOptions } from '../utils/prismZipExport';
-import { exportCompletePrism, CompleteExportOptions } from '../utils/prismCompleteExport';
-import { exportToCSV, CSVExportOptions } from '../utils/csvExport';
+import { exportWithActualTemplate, ActualTemplateOptions, replaceDataInActualTemplate } from '../utils/actualTemplateExport';
 
 interface PrismExportModalProps {
   isOpen: boolean;
@@ -37,26 +33,26 @@ export default function PrismExportModal({
   hasReplicates
 }: PrismExportModalProps) {
   const [selectedExportType, setSelectedExportType] = useState<string>('');
-  const [selectedFormat, setSelectedFormat] = useState<'csv' | 'pzfx' | 'enhanced-pzfx' | 'working-pzfx' | 'complete-zip'>('complete-zip');
-  const [includeAnalysis, setIncludeAnalysis] = useState<boolean>(true);
-  const [includeGraphs, setIncludeGraphs] = useState<boolean>(true);
+  const [selectedFormat, setSelectedFormat] = useState<'basic-pzfx' | 'template-based'>('template-based');
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [useBuiltInTemplate, setUseBuiltInTemplate] = useState<boolean>(true);
   const [isExporting, setIsExporting] = useState(false);
 
-  // Determine available export options
+  // Determine available export options (only needed for basic export)
   const availableOptions = datasets.length > 0 
     ? getPrismExportOptions(datasets[0]?.data || [])
     : getPrismExportOptions(currentData);
 
-  // Set default export type when modal opens
+  // Set default export type when modal opens (only for basic export)
   React.useEffect(() => {
-    if (isOpen && availableOptions.options.length > 0 && !selectedExportType) {
+    if (isOpen && selectedFormat === 'basic-pzfx' && availableOptions.options.length > 0 && !selectedExportType) {
       if (hasReplicates) {
         setSelectedExportType('with_replicates_mean');
       } else {
         setSelectedExportType('raw_and_edited');
       }
     }
-  }, [isOpen, availableOptions, hasReplicates, selectedExportType]);
+  }, [isOpen, selectedFormat, availableOptions, hasReplicates, selectedExportType]);
 
   const exportOptions = [
     {
@@ -86,7 +82,22 @@ export default function PrismExportModal({
   ].filter(option => option.available);
 
   const handleExport = async () => {
-    if (!selectedExportType || isExporting) return;
+    // Validation: template-based needs template file if custom, basic needs export type
+    if (isExporting) return;
+    
+    if (selectedFormat === 'template-based') {
+      if (!useBuiltInTemplate && !templateFile) {
+        alert('Please upload a template file or use the built-in template.');
+        return;
+      }
+    } else if (selectedFormat === 'basic-pzfx') {
+      if (!selectedExportType) {
+        alert('Please select an export type for basic export.');
+        return;
+      }
+    } else {
+      return; // Unknown format
+    }
 
     try {
       setIsExporting(true);
@@ -107,79 +118,63 @@ export default function PrismExportModal({
       
       console.log('Final fitted curves for export:', finalFittedCurves);
 
-      if (selectedFormat === 'complete-zip') {
-        // Export complete analysis package as ZIP
-        const zipExportOptions: ZipExportOptions = {
-          datasets: baseDatasets,
-          editedDataByDataset: baseEditedData,
-          fittedCurvesByDataset: finalFittedCurves
-        };
-        
-        await exportPrismAnalysisZip(zipExportOptions);
-        
-      } else if (selectedFormat === 'working-pzfx') {
-        // Export using WORKING Prism format (default)
-        const workingExportOptions: WorkingPrismExportOptions = {
-          datasets: baseDatasets,
-          editedDataByDataset: baseEditedData,
-          fittedCurvesByDataset: finalFittedCurves
-        };
-        
-        await exportWorkingPrism(workingExportOptions);
-        
-        // Show success message with instructions
-        alert(`✅ Prism file exported successfully!
+      if (selectedFormat === 'template-based') {
+        // Export using template-based approach
+        if (!useBuiltInTemplate && templateFile) {
+          // User uploaded their own template
+          const reader = new FileReader();
+          reader.onload = async (e) => {
+            const templateContent = e.target?.result as string;
+            const modifiedTemplate = replaceDataInActualTemplate(
+              { datasets: baseDatasets, editedDataByDataset: baseEditedData },
+              templateContent
+            );
+            
+            // Download the modified template
+            const blob = new Blob([modifiedTemplate], { type: 'application/xml' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            const timestamp = new Date().toISOString().split('T')[0];
+            const datasetName = baseDatasets[0]?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'data';
+            link.download = `${datasetName}_from_custom_template_${timestamp}.pzfx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            alert(`✅ Template-Based Export Complete!
 
-📊 To analyze your data in GraphPad Prism:
-
-1. Open the exported .pzfx file in GraphPad Prism
-2. Select your data table
-3. Click the "Analyze" button
-4. Choose "XY analyses" → "Nonlinear regression (curve fit)"
-5. In "Dose-response - Stimulation" section, select:
-   "log(agonist) vs. response -- Variable slope (four parameters)"
-6. Click OK
-
-Your results will include:
-• EC50 value
-• Hill Slope
-• Top and Bottom plateaus
-• R² (goodness of fit)
-• Confidence intervals`);
-        
-      } else if (selectedFormat === 'csv') {
-        // Export as CSV
-        const csvOptions: CSVExportOptions = {
-          datasets: baseDatasets,
-          editedDataByDataset: baseEditedData,
-          fittedCurvesByDataset: finalFittedCurves,
-          exportType: selectedExportType as 'raw_and_edited' | 'with_replicates_mean' | 'with_replicates_individual',
-          includeAnalysis: includeAnalysis
-        };
-
-        await exportToCSV(csvOptions);
-      } else if (selectedFormat === 'enhanced-pzfx') {
-        // Export as Enhanced PZFX (experimental)
-        const enhancedExportOptions: EnhancedPrismExportOptions = {
-          datasets: baseDatasets,
-          editedDataByDataset: baseEditedData,
-          fittedCurvesByDataset: finalFittedCurves,
-          exportType: selectedExportType as 'raw_and_edited' | 'with_replicates_mean' | 'with_replicates_individual',
-          includeAnalysis: includeAnalysis,
-          includeGraphs: includeGraphs
-        };
-
-        const result = await exportToEnhancedPrism(enhancedExportOptions);
-        console.log('Enhanced Prism export result:', result);
+Your data has been inserted into your custom template.
+All analysis settings and graph configurations are preserved.`);
+          };
+          reader.readAsText(templateFile);
+        } else {
+          // Use built-in template
+          const templateOptions: ActualTemplateOptions = {
+            datasets: baseDatasets,
+            editedDataByDataset: baseEditedData
+          };
+          await exportWithActualTemplate(templateOptions);
+        }
       } else {
-        // Export as Simple PZFX (legacy)
+        // Basic data-only export
         const simpleExportOptions: SimplePrismExportOptions = {
           datasets: baseDatasets,
           editedDataByDataset: baseEditedData,
           exportType: selectedExportType as 'raw_and_edited' | 'with_replicates_mean' | 'with_replicates_individual'
         };
-
         await exportToSimplePrism(simpleExportOptions);
+        
+        alert(`✅ Basic Prism Export Complete!
+
+📊 To analyze your data in GraphPad Prism:
+
+1. Open the exported .pzfx file
+2. Select your data table
+3. Click "Analyze" → "XY analyses" → "Nonlinear regression"
+4. Choose "log(agonist) vs. response -- Variable slope"
+5. Click OK to run the analysis`);
       }
       
       // Show success message
@@ -224,152 +219,122 @@ Your results will include:
               </div>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Choose the format and data organization for GraphPad Prism analysis:
+              Choose your export method:
             </p>
 
-            {/* Format Selection */}
+            {/* Simplified Format Selection */}
             <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-              <h4 className="font-medium text-gray-900 mb-3">Export Format:</h4>
               <div className="space-y-3">
                 <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
                   <input
                     type="radio"
                     name="format"
-                    value="complete-zip"
-                    checked={selectedFormat === 'complete-zip'}
-                    onChange={(e) => setSelectedFormat(e.target.value as 'complete-zip')}
+                    value="template-based"
+                    checked={selectedFormat === 'template-based'}
+                    onChange={(e) => setSelectedFormat(e.target.value as 'template-based')}
                     className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
                   />
                   <div>
-                    <span className="font-medium text-purple-700">🎯 Complete Analysis Package (Recommended)</span>
-                    <p className="text-sm text-gray-600">ZIP file with data, analysis results, fitted curves, and detailed instructions</p>
+                    <span className="font-medium text-green-700">📊 Template-Based Export (Recommended)</span>
+                    <p className="text-sm text-gray-600">Preserves all analysis settings and graph configurations</p>
                   </div>
                 </label>
                 <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
                   <input
                     type="radio"
                     name="format"
-                    value="working-pzfx"
-                    checked={selectedFormat === 'working-pzfx'}
-                    onChange={(e) => setSelectedFormat(e.target.value as 'working-pzfx')}
+                    value="basic-pzfx"
+                    checked={selectedFormat === 'basic-pzfx'}
+                    onChange={(e) => setSelectedFormat(e.target.value as 'basic-pzfx')}
                     className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
                   />
                   <div>
-                    <span className="font-medium text-green-700">✅ Standard Prism Format</span>
-                    <p className="text-sm text-gray-600">Clean data table only - requires manual analysis setup</p>
-                  </div>
-                </label>
-                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="enhanced-pzfx"
-                    checked={selectedFormat === 'enhanced-pzfx'}
-                    onChange={(e) => setSelectedFormat(e.target.value as 'enhanced-pzfx')}
-                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
-                  />
-                  <div>
-                    <span className="font-medium text-blue-700">🚀 Enhanced Project (Experimental)</span>
-                    <p className="text-sm text-gray-600">Attempts to include analysis - may not work in all Prism versions</p>
-                  </div>
-                </label>
-                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="csv"
-                    checked={selectedFormat === 'csv'}
-                    onChange={(e) => setSelectedFormat(e.target.value as 'csv')}
-                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
-                  />
-                  <div>
-                    <span className="font-medium text-green-700">CSV Format</span>
-                    <p className="text-sm text-gray-600">Simple data export for manual import into Prism</p>
-                  </div>
-                </label>
-                <label className="flex items-start p-3 border rounded-lg cursor-pointer transition-colors hover:bg-white">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="pzfx"
-                    checked={selectedFormat === 'pzfx'}
-                    onChange={(e) => setSelectedFormat(e.target.value as 'pzfx')}
-                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
-                  />
-                  <div>
-                    <span className="font-medium text-orange-700">Basic PZFX (Data Only)</span>
-                    <p className="text-sm text-gray-600">Raw data export without analysis results</p>
+                    <span className="font-medium text-gray-700">📄 Basic Data Export</span>
+                    <p className="text-sm text-gray-600">Simple data table - requires manual analysis setup in Prism</p>
                   </div>
                 </label>
               </div>
             </div>
 
-            {/* Enhanced options for PZFX export */}
-            {(selectedFormat === 'enhanced-pzfx' || selectedFormat === 'csv') && (
+            {/* Template Options - only show when template-based is selected */}
+            {selectedFormat === 'template-based' && (
               <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-3">Export Options:</h4>
-                <div className="space-y-2">
+                <h4 className="font-medium text-gray-900 mb-3">Template Options:</h4>
+                <div className="space-y-3">
                   <label className="flex items-center">
                     <input
-                      type="checkbox"
-                      checked={includeAnalysis}
-                      onChange={(e) => setIncludeAnalysis(e.target.checked)}
+                      type="radio"
+                      checked={useBuiltInTemplate}
+                      onChange={() => setUseBuiltInTemplate(true)}
                       className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
                     />
                     <div>
-                      <span className="font-medium">Include Curve Fitting Results</span>
-                      <p className="text-sm text-gray-600">
-                        Export fitted parameters (EC50, Hill slope, R²) and theoretical curves
-                      </p>
+                      <span className="font-medium">Use Built-in Template</span>
+                      <p className="text-sm text-gray-600">Standard dose-response template (supports up to 3 datasets, 6 samples each)</p>
                     </div>
                   </label>
-                  {selectedFormat === 'enhanced-pzfx' && (
-                    <label className="flex items-center">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      checked={!useBuiltInTemplate}
+                      onChange={() => setUseBuiltInTemplate(false)}
+                      className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
+                    />
+                    <div>
+                      <span className="font-medium">Upload Custom Template</span>
+                      <p className="text-sm text-gray-600">Use your own Prism template file (.pzfx)</p>
+                    </div>
+                  </label>
+                  
+                  {!useBuiltInTemplate && (
+                    <div className="mt-3 p-3 bg-white rounded border border-gray-200">
                       <input
-                        type="checkbox"
-                        checked={includeGraphs}
-                        onChange={(e) => setIncludeGraphs(e.target.checked)}
-                        className="mr-2 text-[#8A0051] focus:ring-[#8A0051]"
+                        type="file"
+                        accept=".pzfx"
+                        onChange={(e) => setTemplateFile(e.target.files?.[0] || null)}
+                        className="text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#8A0051] file:text-white hover:file:bg-[#6A003F]"
                       />
-                      <div>
-                        <span className="font-medium">Include Publication-Ready Graphs</span>
-                        <p className="text-sm text-gray-600">
-                          Pre-configured dose-response graphs with professional formatting
-                        </p>
-                      </div>
-                    </label>
+                      {templateFile && (
+                        <p className="mt-2 text-sm text-green-600">✓ {templateFile.name}</p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
             )}
 
-            {selectedFormat !== 'working-pzfx' && selectedFormat !== 'complete-zip' && (
-            <div className="space-y-3">
-              {exportOptions.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex items-start p-3 border rounded-lg cursor-pointer transition-colors ${
-                    selectedExportType === option.value
-                      ? 'border-[#8A0051] bg-[#8A0051]/5'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="exportType"
-                    value={option.value}
-                    checked={selectedExportType === option.value}
-                    onChange={(e) => setSelectedExportType(e.target.value)}
-                    className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
-                  />
-                  <div className="flex-1">
-                    <div className="font-medium text-gray-900">{option.label}</div>
-                    <div className="text-sm text-gray-600 mt-1">{option.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
+            {/* Export Type Options - only show when basic-pzfx is selected */}
+            {selectedFormat === 'basic-pzfx' && (
+              <div className="mb-6 p-4 bg-orange-50 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-3">Data Organization:</h4>
+                <div className="space-y-3">
+                  {exportOptions.map((option) => (
+                    <label
+                      key={option.value}
+                      className={`flex items-start p-3 border rounded-lg cursor-pointer transition-colors ${
+                        selectedExportType === option.value
+                          ? 'border-[#8A0051] bg-[#8A0051]/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="exportType"
+                        value={option.value}
+                        checked={selectedExportType === option.value}
+                        onChange={(e) => setSelectedExportType(e.target.value)}
+                        className="mt-1 mr-3 text-[#8A0051] focus:ring-[#8A0051]"
+                      />
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">{option.label}</div>
+                        <div className="text-sm text-gray-600 mt-1">{option.description}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
             )}
+
           </div>
 
           {/* Preview of what will be exported */}
@@ -378,39 +343,39 @@ Your results will include:
             <div className="text-sm text-gray-600 space-y-1">
               <div>• {datasets.length || 1} dataset{(datasets.length || 1) !== 1 ? 's' : ''}</div>
               <div>• {hasReplicates ? 'Contains replicate data' : 'Individual data points only'}</div>
-              {includeAnalysis && Object.keys(fittedCurvesByDataset).length > 0 && (
-                <>
-                  <div>• <strong>Curve fitting parameters</strong> (EC50, Hill slope, R²)</div>
-                  <div>• <strong>Fitted curve points</strong> for graphing in Prism</div>
-                </>
-              )}
-              {selectedFormat === 'complete-zip' ? (
+              {selectedFormat === 'template-based' ? (
                 <div>
-                  • <strong>Complete analysis package (.zip)</strong> - everything you need!
-                  <br />• Clean Prism data file (.pzfx) 
-                  <br />• Your fitted parameters from nVitro Studio (.txt)
-                  <br />• Theoretical curve data (.csv)
-                  <br />• Step-by-step analysis script
-                  <br />• Detailed README with instructions
+                  {useBuiltInTemplate ? (
+                    <>
+                      • <strong>Built-in template with your data (.pzfx)</strong>
+                      <br />• Supports up to 3 datasets
+                      <br />• Up to 6 samples per dataset
+                      <br />• Pre-configured dose-response analysis
+                      <br />• Professional graph formatting
+                    </>
+                  ) : templateFile ? (
+                    <>
+                      • <strong>Your custom template: {templateFile.name}</strong>
+                      <br />• Preserves all your analysis settings
+                      <br />• Maintains your graph configurations
+                      <br />• Replaces only the data values
+                    </>
+                  ) : (
+                    <>• Please upload a template file</>
+                  )}
                 </div>
-              ) : selectedFormat === 'working-pzfx' ? (
-                <div>
-                  • <strong>Standard Prism format (.pzfx)</strong> - guaranteed compatibility
-                  <br />• Clean XY data table ready for analysis
-                  <br />• Proper concentration and response columns
-                  <br />• Instructions included for running dose-response analysis
-                </div>
-              ) : selectedFormat === 'enhanced-pzfx' ? (
-                <div>
-                  • <strong>Enhanced Prism project (.pzfx)</strong> - experimental features
-                  <br />• Attempts to include fitted curves and parameters
-                  <br />• May require manual adjustments in some Prism versions
-                  {includeGraphs && <><br />• Graph templates included</>}
-                </div>
-              ) : selectedFormat === 'csv' ? (
-                <div>• CSV format - requires manual import and setup in Prism</div>
               ) : (
-                <div>• Basic PZFX format - minimal data export</div>
+                <div>
+                  • <strong>Basic data export (.pzfx)</strong>
+                  <br />• Simple XY data table
+                  <br />• Concentration and response columns
+                  <br />• Requires manual analysis setup in Prism
+                  {selectedExportType && (
+                    <>
+                      <br />• Export type: {exportOptions.find(opt => opt.value === selectedExportType)?.label}
+                    </>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -432,7 +397,7 @@ Your results will include:
                   : 'bg-[#8A0051] hover:bg-[#6A003F]'
               }`}
               onClick={handleExport}
-              disabled={isExporting || !selectedExportType}
+              disabled={isExporting || (selectedFormat === 'template-based' && !useBuiltInTemplate && !templateFile) || (selectedFormat === 'basic-pzfx' && !selectedExportType)}
             >
               {isExporting ? (
                 <div className="flex items-center">
