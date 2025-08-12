@@ -26,6 +26,10 @@ src/
 │   ├── PowerPointExport.tsx # PowerPoint export
 │   ├── PrismExportModal.tsx # Prism export modal
 │   ├── CurveNameEditor.tsx
+│   ├── AnalysisConfiguration.tsx # Simplified analysis config
+│   ├── DataReviewPanel.tsx # Three-phase workflow
+│   ├── SampleOrganizer.tsx # Replicate grouping
+│   ├── WorkflowProgress.tsx # Phase indicator
 │   └── UnifiedColumnReplicateEditor.tsx
 ├── utils/                 # Utility functions
 │   ├── csvExport.ts       # CSV export utilities
@@ -45,6 +49,9 @@ src/
 - Multi-dataset support with replicate handling
 - Export to PDF, PowerPoint, and Prism formats
 - Real-time data editing capabilities
+- Simplified analysis configuration with essential parameters
+- Automatic replicate detection for chart display controls
+- Area Under Curve (AUC) calculation and display
 
 ## Key Technologies
 - Next.js 15 with React 19
@@ -59,7 +66,9 @@ src/
 - Large main page component (1000+ lines) - could benefit from refactoring
 - Complex state management with multiple dataset tracking
 - Client-side only processing (no backend)
-- **Recent Progress**: Simplified Prism export UI to 2 clean options
+- **Recent Progress**: Simplified analysis configuration and fixed chart controls
+- **Analysis Configuration**: Single UI with essential parameters only
+- **Automatic Replicate Detection**: Chart controls appear when replicates detected
 - **Template-Based Export**: Supports built-in templates + custom template upload
 - Uses advanced React patterns (forwardRef, useMemo, useCallback)
 - Comprehensive error handling for file operations
@@ -76,11 +85,31 @@ src/
 - Export functionality is in `utils/` directory
 - Chart modifications are in `ResultsDisplay.tsx`
 - Main application logic is in `app/page.tsx`
+- **Analysis Configuration**: `AnalysisConfiguration.tsx` (simplified single UI)
 - **Prism Export**: `PrismExportModal.tsx` + `actualTemplateExport.ts`
+- **Workflow Components**: `DataReviewPanel.tsx`, `SampleOrganizer.tsx`, `WorkflowProgress.tsx`
 
-## Recent Progress (Prism Export Enhancement)
+## Recent Progress 
 
-### ✅ COMPLETED TASKS:
+### ✅ LATEST COMPLETED: Analysis Configuration & Chart Controls (December 2024)
+1. **Simplified Analysis Configuration UI**
+   - Streamlined from complex tabbed interface to single essential UI
+   - Only essential options: Assay Type (IC50/EC50), Curve Constraints (Fixed 0-100/Free), Output Metrics
+   - Removed complex parameters: outlier detection, preprocessing, advanced constraints
+   - Clean interface with EC10, EC50, EC90, Slope, R², and AUC metrics selection
+
+2. **Fixed Chart Display Controls**
+   - Added automatic replicate detection throughout the application
+   - Chart controls now appear automatically when replicates are detected
+   - Users can switch between "Show Replicate Groups" and "Show Individual Data"
+   - Detection logic: `replicateGroups.length === sampleNames.length && unique groups < total columns`
+
+3. **AUC Calculation Fix**
+   - Fixed AUC showing NaN - was disabled by default in main configuration
+   - AUC now properly calculated using trapezoidal rule in linear space
+   - Display AUC in Summary Statistics by default
+
+### ✅ COMPLETED: Prism Export Enhancement
 1. **Simplified Prism Export UI**
    - Reduced from 6 complex options to 2 clean options
    - Template-Based Export (Recommended) vs Basic Data Export

@@ -104,7 +104,15 @@ src/
 
 ## Recent Updates
 
-### Prism Export Enhancement (Latest)
+### Analysis Configuration & Chart Controls Simplification (Latest)
+- **Simplified Analysis Configuration**: Streamlined from complex tabbed interface to single, essential UI
+  - Only essential options: Assay Type, Curve Constraints (Fixed/Free), Output Metrics
+  - Removed complex parameters: outlier detection, preprocessing, advanced constraints
+  - Clean interface with EC10, EC50, EC90, Slope, R², and AUC metrics
+- **Fixed Chart Controls**: Automatic replicate detection now enables group vs individual curve selection
+- **AUC Calculation**: Area Under Curve now properly calculated and displayed by default
+
+### Prism Export Enhancement
 - **Simplified UI**: Reduced from 6 complex options to 2 clean choices
 - **Template-Based Export**: 
   - Built-in dose-response templates (1-3 datasets, 6 samples each)
