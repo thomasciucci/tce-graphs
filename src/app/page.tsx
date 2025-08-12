@@ -9,6 +9,10 @@ import { UnifiedPatternSelector } from '../components/UnifiedPatternSelector';
 import { PerSheetPatternSelector } from '../components/PerSheetPatternSelector';
 import { PatternApplicationChoice } from '../components/PatternApplicationChoice';
 import DataEditor from '../components/DataEditor';
+import DataReviewPanel from '../components/DataReviewPanel';
+import SampleOrganizer from '../components/SampleOrganizer';
+import WorkflowProgress, { WorkflowPhase } from '../components/WorkflowProgress';
+import AnalysisConfiguration from '../components/AnalysisConfiguration';
 import CurveFitter from '../components/CurveFitter';
 import ResultsDisplay from '../components/ResultsDisplay';
 import { exportToPDF, captureChartImage } from '../utils/pdfExport';
@@ -30,7 +34,8 @@ import {
   MultiSheetSelection,
   SheetPatternComparison,
   GateAnalysisResult,
-  ProcessedGate
+  ProcessedGate,
+  AnalysisConfiguration as AnalysisConfig
 } from '../types';
 import { fitCurvesForData } from '../fitUtils';
 import { suggestGates } from '../utils/gateDetection';
@@ -126,6 +131,43 @@ export default function Home() {
     groupAssignments: [] as string[]
   });
 
+  // Three-phase workflow state
+  const [workflowPhase, setWorkflowPhase] = useState<WorkflowPhase>('data-review');
+  const [completedPhases, setCompletedPhases] = useState<WorkflowPhase[]>([]);
+  const [reviewedData, setReviewedData] = useState<DataPoint[]>([]);
+  const [organizedData, setOrganizedData] = useState<DataPoint[]>([]);
+  
+  // Analysis configuration state
+  const [analysisConfig, setAnalysisConfig] = useState<AnalysisConfig>({
+    assayType: 'inhibition',
+    constraints: {
+      topConstraints: { enabled: true, min: 80, max: 120 },
+      bottomConstraints: { enabled: true, min: -20, max: 20 },
+      hillSlopeConstraints: { enabled: true, min: -10, max: -0.1 },
+      ec50Constraints: { enabled: false }
+    },
+    statistics: {
+      confidenceLevel: 0.95,
+      calculateCI: true,
+      outlierDetection: { enabled: true, method: 'z-score', threshold: 2.5 },
+      qualityThresholds: { minimumRSquared: 0.80, minimumDataPoints: 6 }
+    },
+    metrics: {
+      calculateIC10: false,
+      calculateIC50: true,
+      calculateIC90: false,
+      calculateEC10: false,
+      calculateEC50: false,
+      calculateEC90: false,
+      calculateHillSlope: true,
+      calculateAUC: true
+    },
+    preprocessing: {
+      normalization: { enabled: false, method: 'percent-control' },
+      logTransform: { concentration: true, response: false }
+    }
+  });
+
   // Add ref for chart capture
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +245,12 @@ export default function Home() {
     setData([]);
     setDatasets([]);
     setFittedCurves([]);
+    
+    // Reset workflow state
+    setWorkflowPhase('data-review');
+    setCompletedPhases([]);
+    setReviewedData([]);
+    setOrganizedData([]);
   }, []);
 
   // Multiple tables import - go directly to comprehensive configuration
@@ -214,6 +262,12 @@ export default function Home() {
     setData([]);
     setDatasets([]);
     setFittedCurves([]);
+    
+    // Reset workflow state
+    setWorkflowPhase('data-review');
+    setCompletedPhases([]);
+    setReviewedData([]);
+    setOrganizedData([]);
   }, []);
 
   // Gate-based workflow handlers
@@ -373,6 +427,34 @@ export default function Home() {
     }
   }, [spreadsheetData, multiSheetSelection]);
 
+  // Three-phase workflow handlers
+  const handleDataReviewComplete = useCallback((reviewedData: DataPoint[]) => {
+    setReviewedData(reviewedData);
+    setCompletedPhases(prev => [...prev.filter(p => p !== 'data-review'), 'data-review']);
+    setWorkflowPhase('sample-organization');
+  }, []);
+
+  const handleSampleOrganizationComplete = useCallback((organizedData: DataPoint[]) => {
+    setOrganizedData(organizedData);
+    setCompletedPhases(prev => [...prev.filter(p => p !== 'sample-organization'), 'sample-organization']);
+    setWorkflowPhase('analysis-setup');
+  }, []);
+
+  const handleAnalysisSetupComplete = useCallback(() => {
+    // Mark analysis setup as complete and hide the workflow
+    setCompletedPhases(prev => [...prev.filter(p => p !== 'analysis-setup'), 'analysis-setup']);
+    
+    // The data has already been updated through handleDataUpdate
+    // Simply hide the workflow by setting phase to null/completed state
+    setWorkflowPhase('results');
+  }, []);
+
+  const handleWorkflowPhaseChange = useCallback((phase: WorkflowPhase) => {
+    if (completedPhases.includes(phase)) {
+      setWorkflowPhase(phase);
+    }
+  }, [completedPhases]);
+
   // Single table: replicate prompt (keep this simple for single tables)
   const handleReplicatePrompt = (hasReps: boolean) => {
     setWorkflowOptions(prev => ({ ...prev, hasReplicates: hasReps }));
@@ -393,6 +475,18 @@ export default function Home() {
         replicateGroups: workflowOptions.hasReplicates ? groupAssignments : undefined,
       }));
       setData(updatedData);
+      
+      // Auto-detect replicates after setting data
+      if (updatedData && updatedData.length > 0) {
+        const hasReplicateGroups = updatedData[0]?.replicateGroups && 
+          updatedData[0].replicateGroups.length === updatedData[0].sampleNames.length &&
+          new Set(updatedData[0].replicateGroups).size < updatedData[0].replicateGroups.length;
+        
+        if (hasReplicateGroups && !workflowOptions.hasReplicates) {
+          setWorkflowOptions(prev => ({ ...prev, hasReplicates: true }));
+        }
+      }
+      
       setShowColumnEditor(false);
       setPendingData(null);
       
@@ -440,6 +534,18 @@ export default function Home() {
         });
         
         setData(allData);
+        
+        // Auto-detect replicates after setting merged data
+        if (allData && allData.length > 0) {
+          const hasReplicateGroups = allData[0]?.replicateGroups && 
+            allData[0].replicateGroups.length === allData[0].sampleNames.length &&
+            new Set(allData[0].replicateGroups).size < allData[0].replicateGroups.length;
+          
+          if (hasReplicateGroups && !workflowOptions.hasReplicates) {
+            setWorkflowOptions(prev => ({ ...prev, hasReplicates: true }));
+          }
+        }
+        
         setShowColumnEditor(false);
         setPendingDatasets([]);
         
@@ -490,6 +596,17 @@ export default function Home() {
 
 
   const handleDataUpdate = (updatedData: DataPoint[]) => {
+    // Auto-detect replicates when data is updated
+    if (updatedData && updatedData.length > 0) {
+      const hasReplicateGroups = updatedData[0]?.replicateGroups && 
+        updatedData[0].replicateGroups.length === updatedData[0].sampleNames.length &&
+        new Set(updatedData[0].replicateGroups).size < updatedData[0].replicateGroups.length;
+      
+      if (hasReplicateGroups && !workflowOptions.hasReplicates) {
+        setWorkflowOptions(prev => ({ ...prev, hasReplicates: true }));
+      }
+    }
+    
     if (datasets.length > 0) {
       // DO NOT update the original dataset - only update edited data tracking
       const datasetId = datasets[activeDatasetIndex]?.id;
@@ -527,6 +644,18 @@ export default function Home() {
 
   const handleCurveFitting = async (curves: FittedCurve[]) => {
     setFittedCurves(curves);
+    
+    // Auto-detect replicates from the current data
+    const currentData = datasets.length > 0 ? datasets[activeDatasetIndex]?.data : data;
+    if (currentData && currentData.length > 0) {
+      const hasReplicateGroups = currentData[0]?.replicateGroups && 
+        currentData[0].replicateGroups.length === currentData[0].sampleNames.length &&
+        new Set(currentData[0].replicateGroups).size < currentData[0].replicateGroups.length;
+      
+      if (hasReplicateGroups && !workflowOptions.hasReplicates) {
+        setWorkflowOptions(prev => ({ ...prev, hasReplicates: true }));
+      }
+    }
     
     // Initialize global settings based on the first dataset's curves
     if (globalCurveColors.length === 0 || globalCurveColors.length !== curves.length) {
@@ -869,7 +998,7 @@ export default function Home() {
            <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-30">
              <div className="bg-white p-8 rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                <h2 className="text-xl font-semibold mb-4">
-                 {pendingData ? 'Configure Dataset' : 'Configure Multiple Tables'}
+                 {pendingData ? 'Configure Dataset' : 'Dataset Analysis Setup'}
                </h2>
                
                {/* Multiple Tables: Comprehensive Options */}
@@ -1086,7 +1215,7 @@ export default function Home() {
                 <h3 className="text-lg font-semibold text-gray-900 mb-8 text-center">Select Import Method</h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Visual Selection Mode */}
+                  {/* Enhanced Selection Mode */}
                   <button
                     onClick={() => setWorkflowMode('gate-based')}
                     className={`p-6 rounded-lg border-2 transition-all text-left ${
@@ -1099,7 +1228,7 @@ export default function Home() {
                       <div className={`w-4 h-4 rounded-full mr-4 ${
                         workflowMode === 'gate-based' ? 'bg-[#8A0051]' : 'bg-gray-300'
                       }`}></div>
-                      <span className="font-semibold text-gray-900">Visual Selection</span>
+                      <span className="font-semibold text-gray-900">Enhanced Selection</span>
                       <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded font-medium">Recommended</span>
                     </div>
                     <p className="text-sm text-gray-600 ml-8">
@@ -1313,17 +1442,70 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Right Column - Data Editor Only */}
+              {/* Right Column - Three-Phase Workflow */}
               <div className="space-y-6">
                 {currentData.length > 0 && (
-                  <DataEditor 
-                    data={currentData} 
-                    onDataUpdate={handleDataUpdate}
-                    datasets={datasets}
-                    activeDatasetIndex={activeDatasetIndex}
-                    onDatasetChange={handleSwitchDataset}
-                    hasReplicates={workflowOptions.hasReplicates}
-                  />
+                  <>
+                    {/* Workflow Progress Indicator */}
+                    <WorkflowProgress
+                      currentPhase={workflowPhase}
+                      completedPhases={completedPhases}
+                      onPhaseClick={handleWorkflowPhaseChange}
+                    />
+
+                    {/* Phase 1: Data Review */}
+                    {workflowPhase === 'data-review' && (
+                      <DataReviewPanel
+                        data={currentData}
+                        onDataUpdate={(data) => {
+                          handleDataUpdate(data);
+                          handleDataReviewComplete(data);
+                        }}
+                        datasets={datasets}
+                        activeDatasetIndex={activeDatasetIndex}
+                        onDatasetChange={handleSwitchDataset}
+                        hasReplicates={workflowOptions.hasReplicates}
+                      />
+                    )}
+
+                    {/* Phase 2: Sample Organization */}
+                    {workflowPhase === 'sample-organization' && (
+                      <SampleOrganizer
+                        data={reviewedData.length > 0 ? reviewedData : currentData}
+                        onGroupingUpdate={handleDataUpdate}
+                        onProceedToAnalysis={() => handleSampleOrganizationComplete(reviewedData.length > 0 ? reviewedData : currentData)}
+                        hasReplicates={workflowOptions.hasReplicates}
+                      />
+                    )}
+
+                    {/* Phase 3: Analysis Setup - Configure analysis parameters */}
+                    {workflowPhase === 'analysis-setup' && (
+                      <AnalysisConfiguration
+                        configuration={analysisConfig}
+                        onConfigurationUpdate={setAnalysisConfig}
+                        onProceed={handleAnalysisSetupComplete}
+                      />
+                    )}
+                    
+                    {/* Phase 4: Results - Show completion message and let user use Calculate All */}
+                    {workflowPhase === 'results' && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                            <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-green-900">Setup Complete!</h3>
+                            <p className="text-sm text-green-700 mt-1">
+                              Your data is ready for analysis. Use the &quot;Calculate All&quot; button below to fit curves to your data.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
