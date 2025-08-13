@@ -16,6 +16,7 @@ import AnalysisConfiguration from '../components/AnalysisConfiguration';
 import CurveFitter from '../components/CurveFitter';
 import ResultsDisplay from '../components/ResultsDisplay';
 import { exportToPDF, captureChartImage } from '../utils/pdfExport';
+import { generateAnalysisMetadata } from '../utils/analysisMetadata';
 import PrismExportModal from '../components/PrismExportModal';
 import dynamic from 'next/dynamic';
 
@@ -137,19 +138,19 @@ export default function Home() {
   const [reviewedData, setReviewedData] = useState<DataPoint[]>([]);
   const [organizedData, setOrganizedData] = useState<DataPoint[]>([]);
   
-  // Analysis configuration state
+  // Analysis configuration state - simplified default
   const [analysisConfig, setAnalysisConfig] = useState<AnalysisConfig>({
     assayType: 'inhibition',
     constraints: {
-      topConstraints: { enabled: true, min: 80, max: 120 },
-      bottomConstraints: { enabled: true, min: -20, max: 20 },
-      hillSlopeConstraints: { enabled: true, min: -10, max: -0.1 },
+      topConstraints: { enabled: false }, // Free fitting by default
+      bottomConstraints: { enabled: false }, // Free fitting by default
+      hillSlopeConstraints: { enabled: false, min: -10, max: 10 },
       ec50Constraints: { enabled: false }
     },
     statistics: {
       confidenceLevel: 0.95,
-      calculateCI: true,
-      outlierDetection: { enabled: true, method: 'z-score', threshold: 2.5 },
+      calculateCI: false,
+      outlierDetection: { enabled: false, method: 'z-score', threshold: 2.5 },
       qualityThresholds: { minimumRSquared: 0.80, minimumDataPoints: 6 }
     },
     metrics: {
@@ -157,7 +158,7 @@ export default function Home() {
       calculateIC50: true,
       calculateIC90: false,
       calculateEC10: false,
-      calculateEC50: false,
+      calculateEC50: true,
       calculateEC90: false,
       calculateHillSlope: true,
       calculateAUC: true
@@ -617,6 +618,37 @@ export default function Home() {
           [datasetId]: JSON.parse(JSON.stringify(updatedData)) // Deep copy
         }));
         
+        // If groups were updated and this is part of a multi-dataset collection,
+        // propagate similar group structure to other datasets with compatible sample names
+        if (datasets.length > 1 && updatedData[0]?.replicateGroups) {
+          const updatedGroups = updatedData[0].replicateGroups;
+          const updatedSampleNames = updatedData[0].sampleNames;
+          
+          // Check other datasets for similar structure and apply groups
+          setEditedDataByDataset(prev => {
+            const newEdited = { ...prev };
+            datasets.forEach((dataset, idx) => {
+              if (idx !== activeDatasetIndex && dataset.id !== datasetId) {
+                const otherData = newEdited[dataset.id] || dataset.data;
+                if (otherData.length > 0 && otherData[0].sampleNames) {
+                  const otherSampleNames = otherData[0].sampleNames;
+                  
+                  // If sample names have same structure, apply similar grouping
+                  if (otherSampleNames.length === updatedSampleNames.length) {
+                    console.log(`Propagating groups from ${datasets[activeDatasetIndex].name} to ${dataset.name}`);
+                    const updatedOtherData = otherData.map(point => ({
+                      ...point,
+                      replicateGroups: [...updatedGroups]
+                    }));
+                    newEdited[dataset.id] = updatedOtherData;
+                  }
+                }
+              }
+            });
+            return newEdited;
+          });
+        }
+        
         // Clear fit for this dataset since data changed
         setFittedCurvesByDataset(prev => {
           const copy = { ...prev };
@@ -718,6 +750,10 @@ export default function Home() {
         const dataset = datasets[i];
         // Use edited data for curve fitting instead of original dataset data
         const dataToFit = editedDataByDataset[dataset.id] || dataset.data;
+        
+        // Ensure groups are preserved for all datasets
+        console.log(`Fitting curves for dataset ${i + 1}:`, dataset.name, 'with groups:', dataToFit[0]?.replicateGroups);
+        
         const curves = fitCurvesForData(dataToFit);
         newFitted[dataset.id] = curves;
         // Set colors for this dataset
@@ -749,6 +785,10 @@ export default function Home() {
       // Fit just the single dataset using edited data
       const dataset = datasets[0];
       const dataToFit = editedDataByDataset[dataset.id] || dataset.data;
+      
+      // Ensure groups are preserved when fitting curves
+      console.log('Fitting curves for dataset:', dataset.name, 'with groups:', dataToFit[0]?.replicateGroups);
+      
       const curves = fitCurvesForData(dataToFit);
       setFittedCurves(curves);
       setFittedCurvesByDataset(prev => ({ ...prev, [dataset.id]: curves }));
@@ -772,6 +812,10 @@ export default function Home() {
     } else if (data.length > 0) {
       // Single dataset in 'data' (not in datasets array) - use edited data if available
       const dataToFit = editedDataByDataset['single'] || data;
+      
+      // Ensure groups are preserved when fitting curves
+      console.log('Fitting curves for single dataset with groups:', dataToFit[0]?.replicateGroups);
+      
       const curves = fitCurvesForData(dataToFit);
       setFittedCurves(curves);
       const newColors = curves.map((_, idx) => defaultColors[idx % defaultColors.length]);
@@ -817,14 +861,23 @@ export default function Home() {
         }
       }
 
+      // Generate comprehensive analysis metadata
+      const datasetsForExport = datasets.length > 0 ? datasets : [{ id: 'single', name: 'Single Dataset', data, assayType: 'Not specified' }];
+      const fittedCurvesForExport = datasets.length > 0 ? fittedCurvesByDataset : { 'single': fittedCurves };
+      const analysisMetadata = generateAnalysisMetadata(
+        datasetsForExport,
+        fittedCurvesForExport,
+        analysisConfig
+      );
+
       const exportOptions = {
-        datasets: datasets.length > 0 ? datasets : [{ id: 'single', name: 'Single Dataset', data, assayType: 'Not specified' }],
-        fittedCurvesByDataset: datasets.length > 0 ? fittedCurvesByDataset : { 'single': fittedCurves },
+        datasets: datasetsForExport,
+        fittedCurvesByDataset: fittedCurvesForExport,
         originalDataByDataset: datasets.length > 0 ? originalDataByDataset : { 'single': originalDataByDataset['single'] || data },
         editedDataByDataset: datasets.length > 0 ? editedDataByDataset : { 'single': editedDataByDataset['single'] || data },
         curveColorsByDataset: datasets.length > 0 ? curveColorsByDataset : { 'single': curveColors },
         curveVisibilityByDataset: datasets.length > 0 ? curveVisibilityByDataset : { 'single': curveVisibilityByDataset['single'] || [] },
-        assayType: datasets[activeDatasetIndex]?.assayType,
+        analysisMetadata,
         chartImage,
         globalChartSettings,
         // Add callbacks for PDF generation
@@ -1593,6 +1646,7 @@ export default function Home() {
                       curveColors={curveColors}
                       activeDatasetIndex={activeDatasetIndex}
                       hasResults={hasResults}
+                      analysisConfig={analysisConfig}
                       onDatasetSwitch={datasets.length > 1 ? handleSwitchDataset : undefined}
                       onCurveVisibilityChange={handleCurveVisibilityChangeForPDF}
                     />

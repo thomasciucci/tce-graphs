@@ -1,7 +1,17 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
-import { DataPoint, FittedCurve, Dataset } from '../types';
+import { 
+  DataPoint, 
+  FittedCurve, 
+  Dataset, 
+  ReplicateGroupUtils, 
+  EnhancedExportOptions,
+  AnalysisMetadata
+} from '../types';
+import { exportChartAsSVG, convertSVGToCanvas } from './svgExport';
+import { PUBLICATION_TYPOGRAPHY } from './publicationStyles';
+import { formatAnalysisMetadataForDisplay } from './analysisMetadata';
 
 // Add domtoimage as a fallback option
 // npm install dom-to-image-more
@@ -24,13 +34,14 @@ interface PDFExportOptions {
   };
 }
 
-// Add interface for dataset switching callback
+// Add interface for dataset switching callback (keeping backward compatibility)
 interface PDFExportOptionsWithCallback extends PDFExportOptions {
   onDatasetSwitch?: (datasetIndex: number) => Promise<void>;
   onCurveVisibilityChange?: (datasetId: string, curveIndex: number, visible: boolean) => Promise<void>;
 }
 
-export async function exportToPDF(options: PDFExportOptionsWithCallback): Promise<void> {
+// Enhanced export function with analysis metadata
+export async function exportToPDF(options: PDFExportOptionsWithCallback | EnhancedExportOptions): Promise<void> {
   try {
     const {
       datasets,
@@ -39,18 +50,26 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
       editedDataByDataset,
       curveColorsByDataset,
       curveVisibilityByDataset,
-      assayType,
       globalChartSettings,
       onDatasetSwitch,
       onCurveVisibilityChange
     } = options;
 
+    // Handle both old and new option formats
+    const analysisMetadata = 'analysisMetadata' in options ? options.analysisMetadata : null;
+    const assayType = 'assayType' in options ? options.assayType : datasets[0]?.assayType;
+
     const pdf = new jsPDF();
     let currentPage = 1;
 
-  // Page 1: Summary and Assay Parameters
-  addSummaryPage(pdf, datasets, assayType);
-  currentPage++;
+    // Page 1: Enhanced Analysis Summary with comprehensive metadata
+    if (analysisMetadata) {
+      addAnalysisParametersPage(pdf, analysisMetadata, datasets);
+    } else {
+      // Fallback to basic summary for backward compatibility
+      addSummaryPage(pdf, datasets, assayType);
+    }
+    currentPage++;
 
   // For each dataset, add one page with raw data, edited data, and results
   for (let i = 0; i < datasets.length; i++) {
@@ -196,6 +215,220 @@ export async function exportToPDF(options: PDFExportOptionsWithCallback): Promis
   }
 }
 
+function addAnalysisParametersPage(pdf: jsPDF, analysisMetadata: AnalysisMetadata, datasets: Dataset[]): void {
+  const formattedMetadata = formatAnalysisMetadataForDisplay(analysisMetadata);
+  
+  // Title
+  pdf.setFontSize(22);
+  pdf.setTextColor(138, 0, 81); // nVitro Studio burgundy
+  pdf.text('Dose-Response Analysis Report', 20, 25);
+  
+  // Subtitle
+  pdf.setFontSize(16);
+  pdf.setTextColor(100, 100, 100);
+  pdf.text('Comprehensive Analysis Parameters & Results', 20, 35);
+  
+  let currentY = 50;
+  
+  // Basic Information Section
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Analysis Information', 20, currentY);
+  currentY += 10;
+  
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['Parameter', 'Value']],
+    body: formattedMetadata.basicInfo,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 10
+    },
+    columnStyles: {
+      0: { cellWidth: 50 },
+      1: { cellWidth: 80 }
+    }
+  });
+  
+  currentY = (pdf as any).lastAutoTable.finalY + 15;
+  
+  // Dataset Summary Section
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Dataset Summary', 20, currentY);
+  currentY += 10;
+  
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['Parameter', 'Value']],
+    body: formattedMetadata.datasetInfo,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 10
+    },
+    columnStyles: {
+      0: { cellWidth: 50 },
+      1: { cellWidth: 80 }
+    }
+  });
+  
+  currentY = (pdf as any).lastAutoTable.finalY + 15;
+  
+  // Analysis Configuration Section
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Analysis Configuration', 20, currentY);
+  currentY += 10;
+  
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['Parameter', 'Setting']],
+    body: formattedMetadata.analysisConfig,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 10
+    },
+    columnStyles: {
+      0: { cellWidth: 60 },
+      1: { cellWidth: 70 }
+    }
+  });
+  
+  // Add new page for continuing sections
+  pdf.addPage();
+  currentY = 30;
+  
+  // Statistical Options Section
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Statistical Options', 20, currentY);
+  currentY += 10;
+  
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['Option', 'Setting']],
+    body: formattedMetadata.statisticalOptions,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 10
+    },
+    columnStyles: {
+      0: { cellWidth: 60 },
+      1: { cellWidth: 70 }
+    }
+  });
+  
+  currentY = (pdf as any).lastAutoTable.finalY + 15;
+  
+  // Quality Metrics Section
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Quality Metrics', 20, currentY);
+  currentY += 10;
+  
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['Metric', 'Value']],
+    body: formattedMetadata.qualityMetrics,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 10
+    },
+    columnStyles: {
+      0: { cellWidth: 50 },
+      1: { cellWidth: 80 }
+    }
+  });
+  
+  currentY = (pdf as any).lastAutoTable.finalY + 15;
+  
+  // Calculated Metrics Section
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Calculated Metrics', 20, currentY);
+  currentY += 10;
+  
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['Metric', 'Status']],
+    body: formattedMetadata.calculatedMetrics,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 10
+    },
+    columnStyles: {
+      0: { cellWidth: 50 },
+      1: { cellWidth: 80 }
+    }
+  });
+  
+  // Add dataset overview table
+  currentY = (pdf as any).lastAutoTable.finalY + 20;
+  
+  pdf.setFontSize(14);
+  pdf.setTextColor(138, 0, 81);
+  pdf.text('Dataset Overview', 20, currentY);
+  currentY += 10;
+  
+  const datasetSummary = datasets.map((ds, index) => [
+    `Dataset ${index + 1}`,
+    ds.name,
+    ds.assayType || 'Not specified',
+    ds.data.length.toString(),
+    (ds.data[0]?.sampleNames?.length || 0).toString()
+  ]);
+
+  autoTable(pdf, {
+    startY: currentY,
+    head: [['#', 'Dataset Name', 'Assay Type', 'Data Points', 'Samples']],
+    body: datasetSummary,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [138, 0, 81],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    styles: {
+      fontSize: 9
+    }
+  });
+  
+  // Add footer with software attribution
+  pdf.setFontSize(8);
+  pdf.setTextColor(128, 128, 128);
+  pdf.text('Generated by nVitro Studio - Professional Dose-Response Analysis', 20, pdf.internal.pageSize.height - 10);
+}
+
 function addSummaryPage(pdf: jsPDF, datasets: Dataset[], assayType?: string): void {
   pdf.setFontSize(20);
   pdf.setTextColor(138, 0, 81); // #8A0051
@@ -295,6 +528,23 @@ async function addDatasetPage(
 
   let currentY = 35;
 
+  // Use custom replicate group names for headers when available
+  const getDisplayHeaders = (data: DataPoint[]): string[] => {
+      if (!data[0]?.sampleNames) return [];
+      if (!data[0]?.replicateGroups || data[0].replicateGroups.length !== data[0].sampleNames.length) {
+        return data[0].sampleNames;
+      }
+      
+      // Use replicate group names, with sample names as fallback for individual samples
+      return data[0].sampleNames.map((sampleName, index) => {
+        const groupName = data[0].replicateGroups?.[index];
+        if (groupName && groupName !== sampleName) {
+          return `${groupName} (${sampleName})`;
+        }
+        return sampleName;
+      });
+    };
+
   // Section 1: Raw Data (very compact)
   pdf.setFontSize(10);
   pdf.setTextColor(138, 0, 81);
@@ -302,7 +552,7 @@ async function addDatasetPage(
   currentY += 8;
 
   if (originalData.length > 0) {
-    const headers = ['Conc [nM]', ...(originalData[0]?.sampleNames || [])];
+    const headers = ['Conc [nM]', ...getDisplayHeaders(originalData)];
     const tableData = originalData.map(row => [
       row.concentration.toString(),
       ...row.responses.map(val => val.toString())
@@ -340,7 +590,7 @@ async function addDatasetPage(
   currentY += 8;
 
   if (editedData.length > 0) {
-    const headers = ['Conc [nM]', ...(editedData[0]?.sampleNames || [])];
+    const headers = ['Conc [nM]', ...getDisplayHeaders(editedData)];
     const tableData = editedData.map((row) => {
       const rowData = [row.concentration.toString()];
       
@@ -432,8 +682,27 @@ async function addDatasetPage(
     pdf.text('Summary Statistics', margin, currentY);
     currentY += 8;
 
+    // Helper function to get display name for sample in summary statistics
+    const getSampleDisplayName = (sampleName: string): string => {
+      if (!originalData[0]?.sampleNames || !originalData[0]?.replicateGroups) {
+        return sampleName;
+      }
+      
+      const sampleIndex = originalData[0].sampleNames.indexOf(sampleName);
+      if (sampleIndex === -1 || sampleIndex >= originalData[0].replicateGroups.length) {
+        return sampleName;
+      }
+      
+      const groupName = originalData[0].replicateGroups[sampleIndex];
+      if (groupName && groupName !== sampleName) {
+        return `${groupName} (${sampleName})`;
+      }
+      
+      return sampleName;
+    };
+
     const summaryData = fittedCurves.map((curve) => [
-      curve.sampleName,
+      getSampleDisplayName(curve.sampleName),
       curve.ec10 ? curve.ec10.toExponential(2) : 'N/A',
       curve.ec50.toExponential(2),
       curve.ec90 ? curve.ec90.toExponential(2) : 'N/A',

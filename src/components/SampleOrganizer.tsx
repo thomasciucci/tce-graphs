@@ -185,14 +185,15 @@ const SampleOrganizer = React.memo(function SampleOrganizer({
     onProceedToAnalysis();
   }, [data, groups, onGroupingUpdate, onProceedToAnalysis]);
 
-  // Validation
+  // Validation - allow progression with individual samples
   const validation = useMemo(() => {
     const issues: string[] = [];
     const hasUnassigned = unassignedSamples.length > 0;
     const hasEmptyGroups = groups.some(g => g.sampleIndices.length === 0);
     const hasSingletonGroups = groups.some(g => g.sampleIndices.length === 1);
+    const hasGroups = groups.length > 0 && groups.some(g => g.sampleIndices.length > 0);
     
-    if (hasUnassigned) {
+    if (hasUnassigned && hasGroups) {
       issues.push(`${unassignedSamples.length} samples not assigned to any group`);
     }
     if (hasSingletonGroups) {
@@ -201,8 +202,10 @@ const SampleOrganizer = React.memo(function SampleOrganizer({
 
     return {
       isValid: issues.length === 0,
-      canProceed: !hasUnassigned && !hasEmptyGroups,
-      issues
+      // Allow progression either with no groups (individual analysis) or with all samples assigned
+      canProceed: !hasEmptyGroups && (!hasGroups || !hasUnassigned),
+      issues,
+      hasGroups
     };
   }, [unassignedSamples, groups]);
 
@@ -232,8 +235,11 @@ const SampleOrganizer = React.memo(function SampleOrganizer({
       <div className="mb-6 p-4 bg-[#8A0051]/10 rounded-lg border border-[#8A0051]/30">
         <h3 className="text-sm font-semibold text-[#8A0051] mb-2">Organize Your Samples</h3>
         <p className="text-sm text-gray-700">
-          Group samples into biological replicates by dragging them into groups below. 
+          <strong>Optional:</strong> Group samples into biological replicates by dragging them into groups below. 
           Samples in the same group will be treated as replicates in the analysis.
+        </p>
+        <p className="text-sm text-gray-600 mt-1">
+          You can also proceed without grouping to analyze samples individually.
         </p>
       </div>
 
@@ -411,7 +417,9 @@ const SampleOrganizer = React.memo(function SampleOrganizer({
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
             >
-              <span>Proceed to Analysis</span>
+              <span>
+                {validation.hasGroups ? 'Proceed with Groups' : 'Proceed with Individual Samples'}
+              </span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

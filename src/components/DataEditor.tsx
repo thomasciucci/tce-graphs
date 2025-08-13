@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { DataPoint } from '../types';
+import { DataPoint, ReplicateGroupUtils } from '../types';
 
 interface DataEditorProps {
   data: DataPoint[];
@@ -55,9 +55,18 @@ const DataEditor = React.memo(function DataEditor({ data, onDataUpdate, datasets
     });
   }, []);
 
+  // Handler for renaming entire replicate groups
+  const handleGroupRename = useCallback((oldName: string, newName: string) => {
+    if (oldName === newName || !newName.trim()) return;
+    
+    setReplicateGroups(prev => prev.map(group => group === oldName ? newName.trim() : group));
+    setEditingData(prev => ReplicateGroupUtils.updateGroupNames(prev, oldName, newName.trim()));
+  }, []);
+
   const handleSave = useCallback(() => {
-    // Preserve replicateGroups in all rows
-    const updated = editingData.map(row => ({ ...row, replicateGroups: [...replicateGroups] }));
+    // Ensure replicate groups are consistent and preserve them in all rows
+    const updatedWithGroups = ReplicateGroupUtils.ensureReplicateGroups(editingData);
+    const updated = updatedWithGroups.map(row => ({ ...row, replicateGroups: [...replicateGroups] }));
     onDataUpdate(updated);
     setIsEditing(false);
     setEditingData(updated);
@@ -293,6 +302,47 @@ const DataEditor = React.memo(function DataEditor({ data, onDataUpdate, datasets
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Replicate Group Management Section */}
+      {isEditing && hasReplicates && (
+        <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+            <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            Replicate Group Summary
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {ReplicateGroupUtils.getUniqueGroups(editingData).map((groupName) => {
+              const samplesInGroup = ReplicateGroupUtils.getSamplesInGroup(editingData, groupName);
+              const sampleNames = samplesInGroup.map(i => editingData[0].sampleNames[i]);
+              return (
+                <div key={groupName} className="bg-white p-3 rounded border border-gray-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-semibold text-gray-800">{groupName}</h4>
+                    <span className="text-sm text-gray-500">{samplesInGroup.length} samples</span>
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    <strong>Samples:</strong> {sampleNames.join(', ')}
+                  </div>
+                  <div className="mt-2">
+                    <input
+                      type="text"
+                      value={groupName}
+                      onChange={(e) => handleGroupRename(groupName, e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Group name"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 text-xs text-gray-600">
+            💡 <strong>Tip:</strong> Rename groups to create meaningful labels that will appear in your graphs and exports.
+          </div>
         </div>
       )}
 

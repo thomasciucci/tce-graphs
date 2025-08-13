@@ -1,4 +1,4 @@
-import { DataPoint, Dataset } from '../types';
+import { DataPoint, Dataset, ReplicateGroupUtils } from '../types';
 
 export interface ActualTemplateOptions {
   datasets: Dataset[];
@@ -166,6 +166,21 @@ function replaceTableData(
   
   // Replace ALL Y columns in this table (up to 6 columns)
   const sampleNames = data[0]?.sampleNames || [];
+  
+  // Helper function to get display name for Prism export
+  const getSampleDisplayName = (sampleName: string, index: number): string => {
+    if (!data[0]?.replicateGroups || data[0].replicateGroups.length !== data[0].sampleNames.length) {
+      return sampleName;
+    }
+    
+    const groupName = data[0].replicateGroups[index];
+    if (groupName && groupName !== sampleName) {
+      return `${groupName} (${sampleName})`;
+    }
+    
+    return sampleName;
+  };
+  
   const yColumnRegex = /<YColumn[^>]*>[\s\S]*?<\/YColumn>/g;
   const yColumns = tableContent.match(yColumnRegex) || [];
   
@@ -176,6 +191,7 @@ function replaceTableData(
     if (columnIndex < sampleNames.length) {
       // We have data for this column
       const sampleName = sampleNames[columnIndex];
+      const displayName = getSampleDisplayName(sampleName, columnIndex);
       const responses = data.map(point => {
         const value = point.responses[columnIndex];
         if (value !== null && value !== undefined && !isNaN(value)) {
@@ -186,11 +202,11 @@ function replaceTableData(
       }).join('\n');
       
       const updatedColumn = yColumn
-        .replace(/<Title>[^<]*<\/Title>/, `<Title>${escapeXML(sampleName)}</Title>`)
+        .replace(/<Title>[^<]*<\/Title>/, `<Title>${escapeXML(displayName)}</Title>`)
         .replace(/(<Subcolumn>\s*)[\s\S]*?(\s*<\/Subcolumn>)/, `$1\n${responses}\n$2`);
       
       tableContent = tableContent.replace(yColumn, updatedColumn);
-      console.log(`Replaced column ${columnIndex + 1} with data for ${sampleName}`);
+      console.log(`Replaced column ${columnIndex + 1} with data for ${displayName}`);
     } else {
       // No data for this column, clear it
       const emptyData = data.map(() => '<d/>').join('\n');

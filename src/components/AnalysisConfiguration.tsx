@@ -13,65 +13,34 @@ interface AnalysisConfigurationProps {
   onProceed: () => void;
 }
 
-// Simplified configuration presets
-const DEFAULT_CONFIGS: Record<string, AnalysisConfiguration> = {
-  inhibition: {
-    assayType: 'inhibition',
-    constraints: {
-      topConstraints: { enabled: true, fixed: 100 },
-      bottomConstraints: { enabled: true, fixed: 0 },
-      hillSlopeConstraints: { enabled: false, min: -10, max: -0.1 },
-      ec50Constraints: { enabled: false }
-    },
-    statistics: {
-      confidenceLevel: 0.95,
-      calculateCI: false,
-      outlierDetection: { enabled: false, method: 'z-score', threshold: 2.5 },
-      qualityThresholds: { minimumRSquared: 0.80, minimumDataPoints: 6 }
-    },
-    metrics: {
-      calculateIC10: true,
-      calculateIC50: true,
-      calculateIC90: true,
-      calculateEC10: false,
-      calculateEC50: false,
-      calculateEC90: false,
-      calculateHillSlope: true,
-      calculateAUC: true
-    },
-    preprocessing: {
-      normalization: { enabled: false, method: 'percent-control' },
-      logTransform: { concentration: true, response: false }
-    }
+// Simplified default configuration - unified approach for all assays
+const DEFAULT_CONFIG: AnalysisConfiguration = {
+  assayType: 'general', // Single workflow for all assay types
+  constraints: {
+    topConstraints: { enabled: false }, // Free fitting by default
+    bottomConstraints: { enabled: false }, // Free fitting by default
+    hillSlopeConstraints: { enabled: false, min: -10, max: 10 },
+    ec50Constraints: { enabled: false }
   },
-  stimulation: {
-    assayType: 'stimulation',
-    constraints: {
-      topConstraints: { enabled: false },
-      bottomConstraints: { enabled: true, fixed: 0 },
-      hillSlopeConstraints: { enabled: false, min: 0.1, max: 10 },
-      ec50Constraints: { enabled: false }
-    },
-    statistics: {
-      confidenceLevel: 0.95,
-      calculateCI: false,
-      outlierDetection: { enabled: false, method: 'z-score', threshold: 2.5 },
-      qualityThresholds: { minimumRSquared: 0.80, minimumDataPoints: 6 }
-    },
-    metrics: {
-      calculateIC10: false,
-      calculateIC50: false,
-      calculateIC90: false,
-      calculateEC10: true,
-      calculateEC50: true,
-      calculateEC90: true,
-      calculateHillSlope: true,
-      calculateAUC: true
-    },
-    preprocessing: {
-      normalization: { enabled: false, method: 'percent-control' },
-      logTransform: { concentration: true, response: false }
-    }
+  statistics: {
+    confidenceLevel: 0.95,
+    calculateCI: false,
+    outlierDetection: { enabled: false, method: 'z-score', threshold: 2.5 },
+    qualityThresholds: { minimumRSquared: 0.80, minimumDataPoints: 6 }
+  },
+  metrics: {
+    calculateIC10: true,
+    calculateIC50: true,
+    calculateIC90: true,
+    calculateEC10: true,
+    calculateEC50: true,
+    calculateEC90: true,
+    calculateHillSlope: true,
+    calculateAUC: true
+  },
+  preprocessing: {
+    normalization: { enabled: false, method: 'percent-control' },
+    logTransform: { concentration: true, response: false }
   }
 };
 
@@ -80,13 +49,6 @@ const AnalysisConfigurationComponent: React.FC<AnalysisConfigurationProps> = ({
   onConfigurationUpdate,
   onProceed
 }) => {
-
-  // Handle preset selection
-  const handlePresetChange = useCallback((preset: string) => {
-    if (preset in DEFAULT_CONFIGS) {
-      onConfigurationUpdate(DEFAULT_CONFIGS[preset]);
-    }
-  }, [onConfigurationUpdate]);
 
   // Update constraints - simplified for top/bottom only
   const updateConstraints = useCallback((constraintType: 'top' | 'bottom', constraintMode: 'fixed' | 'free') => {
@@ -118,29 +80,6 @@ const AnalysisConfigurationComponent: React.FC<AnalysisConfigurationProps> = ({
       <div className="flex items-center gap-3 mb-6">
         <Settings className="w-6 h-6 text-[#8A0051]" />
         <h2 className="text-2xl font-bold text-gray-900">Analysis Configuration</h2>
-      </div>
-
-      {/* Assay Type Selection */}
-      <div className="mb-6 p-4 bg-[#8A0051]/5 rounded-lg border border-[#8A0051]/20">
-        <h3 className="text-sm font-semibold text-[#8A0051] mb-3">Assay Type</h3>
-        <div className="grid grid-cols-2 gap-3">
-          {Object.entries({
-            inhibition: 'IC50 Inhibition',
-            stimulation: 'EC50 Stimulation'
-          }).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => handlePresetChange(key)}
-              className={`px-4 py-2 rounded-md border transition-all ${
-                configuration.assayType === key
-                  ? 'bg-[#8A0051] text-white border-[#8A0051]'
-                  : 'bg-white text-gray-700 border-gray-300 hover:border-[#8A0051]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="space-y-6">
@@ -177,23 +116,83 @@ const AnalysisConfigurationComponent: React.FC<AnalysisConfigurationProps> = ({
         <div className="border border-gray-200 rounded-lg p-4">
           <h4 className="font-medium text-gray-900 mb-4">Output Metrics</h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {Object.entries({
-              calculateEC10: 'EC10',
-              calculateEC50: 'EC50', 
-              calculateEC90: 'EC90',
-              calculateHillSlope: 'Slope',
-              calculateAUC: 'AUC'
-            }).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={configuration.metrics[key as keyof OutputMetrics]}
-                  onChange={(e) => updateMetrics({ [key]: e.target.checked })}
-                  className="rounded text-[#8A0051] focus:ring-[#8A0051]"
-                />
-                <span className="text-sm text-gray-700">{label}</span>
-              </label>
-            ))}
+            {/* EC Metrics */}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateEC10}
+                onChange={(e) => updateMetrics({ calculateEC10: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">EC10</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateEC50}
+                onChange={(e) => updateMetrics({ calculateEC50: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">EC50</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateEC90}
+                onChange={(e) => updateMetrics({ calculateEC90: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">EC90</span>
+            </label>
+            
+            {/* IC Metrics */}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateIC10}
+                onChange={(e) => updateMetrics({ calculateIC10: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">IC10</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateIC50}
+                onChange={(e) => updateMetrics({ calculateIC50: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">IC50</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateIC90}
+                onChange={(e) => updateMetrics({ calculateIC90: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">IC90</span>
+            </label>
+            
+            {/* Common metrics */}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateHillSlope}
+                onChange={(e) => updateMetrics({ calculateHillSlope: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">Hill Slope</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={configuration.metrics.calculateAUC}
+                onChange={(e) => updateMetrics({ calculateAUC: e.target.checked })}
+                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
+              />
+              <span className="text-sm text-gray-700">AUC</span>
+            </label>
           </div>
           <div className="mt-3 pt-3 border-t border-gray-100">
             <p className="text-xs text-gray-500">

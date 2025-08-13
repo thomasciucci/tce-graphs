@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { DataPoint, FittedCurve, Dataset } from '../types';
+import { DataPoint, FittedCurve, Dataset, AnalysisConfiguration } from '../types';
+import { generateAnalysisMetadata } from '../utils/analysisMetadata';
 
 interface PowerPointExportProps {
   datasets: Dataset[];
@@ -22,6 +23,7 @@ interface PowerPointExportProps {
   curveColors: string[];
   activeDatasetIndex: number;
   hasResults: boolean;
+  analysisConfig: AnalysisConfiguration;
   onDatasetSwitch?: (datasetIndex: number) => Promise<void>;
   onCurveVisibilityChange?: (datasetId: string, curveIndex: number, visible: boolean) => Promise<void>;
 }
@@ -40,6 +42,7 @@ export default function PowerPointExport({
   curveColors,
   activeDatasetIndex,
   hasResults,
+  analysisConfig,
   onDatasetSwitch,
   onCurveVisibilityChange
 }: PowerPointExportProps) {
@@ -54,14 +57,23 @@ export default function PowerPointExport({
       // Dynamic import that won't be processed during build
       const { exportToPowerPoint } = await import('../utils/pptExport');
       
+      // Generate comprehensive analysis metadata
+      const datasetsForExport = datasets.length > 0 ? datasets : [{ id: 'single', name: 'Single Dataset', data, assayType: 'Not specified' }];
+      const fittedCurvesForExport = datasets.length > 0 ? fittedCurvesByDataset : { 'single': fittedCurves };
+      const analysisMetadata = generateAnalysisMetadata(
+        datasetsForExport,
+        fittedCurvesForExport,
+        analysisConfig
+      );
+
       const exportOptions = {
-        datasets: datasets.length > 0 ? datasets : [{ id: 'single', name: 'Single Dataset', data, assayType: 'Not specified' }],
-        fittedCurvesByDataset: datasets.length > 0 ? fittedCurvesByDataset : { 'single': fittedCurves },
+        datasets: datasetsForExport,
+        fittedCurvesByDataset: fittedCurvesForExport,
         originalDataByDataset: datasets.length > 0 ? originalDataByDataset : { 'single': originalDataByDataset['single'] || data },
         editedDataByDataset: datasets.length > 0 ? editedDataByDataset : { 'single': editedDataByDataset['single'] || data },
         curveColorsByDataset: datasets.length > 0 ? curveColorsByDataset : { 'single': curveColors },
         curveVisibilityByDataset: datasets.length > 0 ? curveVisibilityByDataset : { 'single': curveVisibilityByDataset['single'] || [] },
-        assayType: datasets[activeDatasetIndex]?.assayType || assayType,
+        analysisMetadata,
         globalChartSettings,
         onDatasetSwitch: datasets.length > 1 ? onDatasetSwitch : undefined,
         onCurveVisibilityChange

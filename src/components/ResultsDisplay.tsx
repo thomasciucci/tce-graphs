@@ -2,7 +2,15 @@
 
 import React, { forwardRef, useMemo } from 'react';
 import { ComposedChart, Line, Scatter, XAxis, YAxis, ResponsiveContainer, Legend, ErrorBar, BarChart, Bar } from 'recharts';
-import { DataPoint, FittedCurve } from '../types';
+import { DataPoint, FittedCurve, ReplicateGroupUtils } from '../types';
+import { 
+  getPublicationAxisStyle, 
+  getPublicationAxisLabelStyle, 
+  getPublicationLegendStyle,
+  getPublicationChartTitleStyle,
+  CHART_STYLES,
+  PUBLICATION_TYPOGRAPHY
+} from '../utils/publicationStyles';
 
 interface ResultsDisplayProps {
   data: DataPoint[];
@@ -85,6 +93,22 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
   const groupCurves = fittedCurves.filter(curve => groupNames.includes(curve.sampleName) && curve.meanPoints && curve.meanPoints.length >= 3);
   const individualCurves = fittedCurves.filter(curve => data[0]?.sampleNames.includes(curve.sampleName));
 
+  // Create mapping for display names
+  const getDisplayName = useMemo(() => (sampleName: string): string => {
+    // If this is a group name, return it as-is (it's already the custom name)
+    if (groupNames.includes(sampleName)) {
+      return sampleName;
+    }
+    // If this is an individual sample, check if it has a custom group name
+    if (data[0]?.sampleNames && data[0]?.replicateGroups) {
+      const sampleIndex = data[0].sampleNames.indexOf(sampleName);
+      if (sampleIndex !== -1 && data[0].replicateGroups[sampleIndex]) {
+        return `${data[0].replicateGroups[sampleIndex]} (${sampleName})`;
+      }
+    }
+    return sampleName;
+  }, [data, groupNames]);
+
   // Prepare bar chart data - always group by sample (moved before early returns to fix React Hook order)
   const barChartData = useMemo(() => {
     if (!showBarChart || !fittedCurves || fittedCurves.length === 0) return { data: [], allConcs: [] };
@@ -104,7 +128,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
     // Each row is a sample, each bar is a concentration
     const data: Record<string, unknown>[] = curvesToShow.map((curve, idx) => {
       const row: Record<string, unknown> = {
-        sampleName: curve.sampleName
+        sampleName: getDisplayName(curve.sampleName)
       };
       if (curveVisibility?.[idx] !== false) {
         const points = curve.meanPoints && curve.meanPoints.length > 0 ? curve.meanPoints : curve.originalPoints;
@@ -351,6 +375,12 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                       <span className="text-gray-600">Top:</span>
                       <span className="font-medium text-gray-900">{curve.top.toFixed(2)}%</span>
                     </div>
+                    {curve.auc !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">AUC:</span>
+                        <span className="font-medium text-gray-900">{curve.auc.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Bottom:</span>
                       <span className="font-medium text-gray-900">{curve.bottom.toFixed(2)}%</span>
@@ -509,7 +539,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                         left: '15px',
                         top: 'calc(50% - 50px)',
                         fontSize: '22px',
-                        fontFamily: 'Arial, sans-serif',
+                        fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont,
                         fontWeight: 'bold',
                         color: '#000000',
                         whiteSpace: 'nowrap',
@@ -525,7 +555,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                     
                     <ResponsiveContainer width="100%" height="100%" minWidth={800} data-testid="concentration-response-chart" className="recharts-responsive-container">
                     <ComposedChart data={validChartData}
-                      margin={{ top: 60, right: 150, left: 80, bottom: 120 }}
+                      margin={{ top: PUBLICATION_TYPOGRAPHY.margins.top, right: 150, left: PUBLICATION_TYPOGRAPHY.margins.left, bottom: PUBLICATION_TYPOGRAPHY.margins.bottom }}
                       data-testid="main-chart-svg"
                     >
                       <XAxis 
@@ -538,7 +568,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                           position: 'bottom', 
                           offset: 15, 
                           fontSize: 24, 
-                          fontFamily: 'Arial, sans-serif',
+                          fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont,
                           fontWeight: 'bold',
                           fill: '#000000'
                         }}
@@ -582,9 +612,9 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                           }
                         }}
                         ticks={xAxisTicks}
-                        tick={{ fontSize: 22, fontFamily: 'Arial, sans-serif', fontWeight: 'bold' }}
+                        {...getPublicationAxisStyle()}
                         allowDataOverflow={false}
-                        axisLine={{ stroke: '#000000', strokeWidth: 2 }}
+                        axisLine={{ stroke: CHART_STYLES.axis.stroke, strokeWidth: CHART_STYLES.axis.strokeWidth }}
                       />
                       <YAxis
                         label={{ 
@@ -592,7 +622,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                           angle: -90, 
                           position: 'outside',
                           fontSize: 22, 
-                          fontFamily: 'Arial, sans-serif', 
+                          fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont, 
                           fontWeight: 'bold',
                           offset: 70,
                           textAnchor: 'middle',
@@ -600,8 +630,8 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                         }}
                         domain={[0, 100]}
                         ticks={[0, 20, 40, 60, 80, 100]}
-                        tick={{ fontSize: 22, fontFamily: 'Arial, sans-serif', fontWeight: 'bold' }}
-                        axisLine={{ stroke: '#000000', strokeWidth: 2 }}
+                        {...getPublicationAxisStyle()}
+                        axisLine={{ stroke: CHART_STYLES.axis.stroke, strokeWidth: CHART_STYLES.axis.strokeWidth }}
                       />
                       {/* Enhanced Legend for PDF */}
                       <Legend 
@@ -612,7 +642,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                         wrapperStyle={{ 
                           right: 0, 
                           fontSize: 16, 
-                          fontFamily: 'Arial, sans-serif',
+                          fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont,
                           fontWeight: 'bold',
                           maxWidth: 120,
                           padding: '8px',
@@ -623,63 +653,62 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                       />
                       {/* Fitted curves for groups */}
                       {showGroups && groupCurves.map((curve, index) => 
-                        curveVisibility[index] !== false ? [
-                          <Line
-                            key={`${curve.sampleName || 'group'}_${index}_fitted`}
-                            type="monotone"
-                            dataKey={`${curve.sampleName}_fitted`}
-                            stroke={curveColors[index % curveColors.length] || '#000000'}
-                            strokeWidth={3}
-                            dot={false}
-                            connectNulls={true}
-                            legendType="line"
-                            name={`${curve.sampleName} (Group)`}
-                          />,
-                          <Scatter
-                            key={`${curve.sampleName || 'group'}_${index}_meanDots`}
-                            name={`${curve.sampleName} Mean ± SEM`}
-                            dataKey={`${curve.sampleName}_mean`}
-                            fill={curveColors[index % curveColors.length] || '#000000'}
-                            shape="circle"
-                            legendType="circle"
-                            r={7}
-                          >
-                            <ErrorBar
-                              key={`errorbar-${curve.sampleName || 'group'}-${index}`}
-                              dataKey={`${curve.sampleName}_sem`}
-                              width={6}
+                        curveVisibility[index] !== false ? (
+                          <React.Fragment key={`group-${curve.sampleName}-${index}`}>
+                            <Line
+                              type="monotone"
+                              dataKey={`${curve.sampleName}_fitted`}
                               stroke={curveColors[index % curveColors.length] || '#000000'}
-                              direction="y"
-                              strokeWidth={2}
+                              strokeWidth={CHART_STYLES.curveLine.strokeWidth}
+                              dot={false}
+                              connectNulls={true}
+                              legendType="line"
+                              name={getDisplayName(curve.sampleName)}
                             />
-                          </Scatter>
-                        ] : null
-                      ).flat().filter(Boolean)}
+                            <Scatter
+                              name={`${getDisplayName(curve.sampleName)} Mean ± SEM`}
+                              dataKey={`${curve.sampleName}_mean`}
+                              fill={curveColors[index % curveColors.length] || '#000000'}
+                              shape="circle"
+                              legendType="none"
+                              r={7}
+                            >
+                              <ErrorBar
+                                dataKey={`${curve.sampleName}_sem`}
+                                width={6}
+                                stroke={curveColors[index % curveColors.length] || '#000000'}
+                                direction="y"
+                                strokeWidth={CHART_STYLES.errorBar.strokeWidth}
+                              />
+                            </Scatter>
+                          </React.Fragment>
+                        ) : null
+                      )}
                       {/* Fitted curves for individuals */}
                       {showIndividuals && individualCurves.map((curve, index) => 
-                        curveVisibility[index] !== false ? [
-                          <Line
-                            key={`${curve.sampleName || 'curve'}_${index}_fitted`}
-                            type="monotone"
-                            dataKey={`${curve.sampleName}_fitted`}
-                            stroke={curveColors[index % curveColors.length] || '#000000'}
-                            strokeWidth={3}
-                            dot={false}
-                            connectNulls={true}
-                            legendType="line"
-                            name={curve.sampleName}
-                          />,
-                          <Scatter
-                            key={`${curve.sampleName || 'curve'}_${index}_original`}
-                            name={curve.sampleName}
-                            dataKey={`${curve.sampleName}_original`}
-                            fill={curveColors[index % curveColors.length] || '#000000'}
-                            shape="square"
-                            legendType="none"
-                            r={5}
-                          />
-                        ] : null
-                      ).flat().filter(Boolean)}
+                        curveVisibility[index] !== false ? (
+                          <React.Fragment key={`individual-${curve.sampleName}-${index}`}>
+                            <Line
+                              type="monotone"
+                              dataKey={`${curve.sampleName}_fitted`}
+                              stroke={curveColors[index % curveColors.length] || '#000000'}
+                              strokeWidth={CHART_STYLES.curveLine.strokeWidth}
+                              dot={false}
+                              connectNulls={true}
+                              legendType="line"
+                              name={getDisplayName(curve.sampleName)}
+                            />
+                            <Scatter
+                              name={getDisplayName(curve.sampleName)}
+                              dataKey={`${curve.sampleName}_original`}
+                              fill={curveColors[index % curveColors.length] || '#000000'}
+                              shape="square"
+                              legendType="none"
+                              r={5}
+                            />
+                          </React.Fragment>
+                        ) : null
+                      )}
                     </ComposedChart>
                     </ResponsiveContainer>
                   </div>
@@ -698,7 +727,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                         left: '15px',
                         top: 'calc(50% - 50px)',
                         fontSize: '22px',
-                        fontFamily: 'Arial, sans-serif',
+                        fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont,
                         fontWeight: 'bold',
                         color: '#000000',
                         whiteSpace: 'nowrap',
@@ -714,7 +743,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                     
                     <ResponsiveContainer width="100%" height="100%" minWidth={800} className="recharts-responsive-container">
                       <BarChart data={barChartData.data}
-                        margin={{ top: 60, right: 80, left: 80, bottom: 120 }}
+                        margin={{ top: PUBLICATION_TYPOGRAPHY.margins.top, right: PUBLICATION_TYPOGRAPHY.margins.right, left: PUBLICATION_TYPOGRAPHY.margins.left, bottom: PUBLICATION_TYPOGRAPHY.margins.bottom }}
                         data-testid="bar-chart-svg"
                         barGap={-10}
                         barCategoryGap={1}
@@ -728,12 +757,12 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                             position: 'bottom',
                             offset: 15,
                             fontSize: 24,
-                            fontFamily: 'Arial, sans-serif',
+                            fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont,
                             fontWeight: 'bold',
                             fill: '#000000'
                           }}
-                          tick={{ fontSize: 16, fontFamily: 'Arial, sans-serif', fontWeight: 'bold' }}
-                          axisLine={{ stroke: '#000000', strokeWidth: 2 }}
+                          {...getPublicationAxisStyle()}
+                          axisLine={{ stroke: CHART_STYLES.axis.stroke, strokeWidth: CHART_STYLES.axis.strokeWidth }}
                         />
                         <YAxis
                           label={{ 
@@ -741,7 +770,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                             angle: -90, 
                             position: 'outside',
                             fontSize: 22, 
-                            fontFamily: 'Arial, sans-serif', 
+                            fontFamily: PUBLICATION_TYPOGRAPHY.primaryFont, 
                             fontWeight: 'bold',
                             offset: 70,
                             textAnchor: 'middle',
@@ -749,8 +778,8 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                           }}
                           domain={[0, 100]}
                           ticks={[0, 20, 40, 60, 80, 100]}
-                          tick={{ fontSize: 22, fontFamily: 'Arial, sans-serif', fontWeight: 'bold' }}
-                          axisLine={{ stroke: '#000000', strokeWidth: 2 }}
+                          {...getPublicationAxisStyle()}
+                          axisLine={{ stroke: CHART_STYLES.axis.stroke, strokeWidth: CHART_STYLES.axis.strokeWidth }}
                         />
 
                         {/* Show all concentrations with reduced spacing */}
@@ -763,7 +792,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                                   key={`${curve.sampleName}_${conc}`}
                                   dataKey={`${curve.sampleName}_${conc}`}
                                   fill={curveColors[sampleIdx % curveColors.length] || '#000000'}
-                                  name={curve.sampleName}
+                                  name={getDisplayName(curve.sampleName)}
                                   radius={[4, 4, 0, 0]}
                                   maxBarSize={200}
                                 />
@@ -789,7 +818,7 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                                   className="w-4 h-4 rounded-sm"
                                   style={{ backgroundColor: curveColors[idx % curveColors.length] || '#000000' }}
                                 />
-                                <span className="text-sm font-medium">{curve.sampleName}</span>
+                                <span className="text-sm font-medium">{getDisplayName(curve.sampleName)}</span>
                               </div>
                             ));
                         })()}

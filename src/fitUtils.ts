@@ -38,6 +38,34 @@ const calculateRSquared = (actual: number[], predicted: number[]): number => {
   return 1 - (ssRes / ssTot);
 };
 
+// Calculate Area Under Curve using trapezoidal rule
+const calculateAUC = (fittedPoints: { x: number; y: number }[]): number => {
+  if (fittedPoints.length < 2) return 0;
+  
+  // Sort points by x-coordinate (concentration)
+  const sortedPoints = [...fittedPoints].sort((a, b) => a.x - b.x);
+  
+  let auc = 0;
+  for (let i = 1; i < sortedPoints.length; i++) {
+    const x1 = sortedPoints[i - 1].x;
+    const y1 = sortedPoints[i - 1].y;
+    const x2 = sortedPoints[i].x;
+    const y2 = sortedPoints[i].y;
+    
+    // Skip invalid points
+    if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) continue;
+    
+    // Trapezoidal rule: (x2 - x1) * (y1 + y2) / 2
+    // Points are already in linear space
+    const width = x2 - x1;
+    const avgHeight = (y1 + y2) / 2;
+    
+    auc += width * avgHeight;
+  }
+  
+  return auc;
+};
+
 // Simple curve fitting using grid search
 const fitCurve = (concentrations: number[], responses: number[]): FittedCurve => {
   const X = concentrations.map(Number);
@@ -92,6 +120,7 @@ const fitCurve = (concentrations: number[], responses: number[]): FittedCurve =>
   // Calculate EC10 and EC90
   const ec10 = calculateEC10(bestTop, bestBottom, bestEc50, bestHillSlope);
   const ec90 = calculateEC90(bestTop, bestBottom, bestEc50, bestHillSlope);
+  const auc = calculateAUC(fittedPoints);
   
   return {
     sampleName: 'Sample',
@@ -102,6 +131,7 @@ const fitCurve = (concentrations: number[], responses: number[]): FittedCurve =>
     top: bestTop,
     bottom: bestBottom,
     rSquared: bestRSquared,
+    auc: auc,
     fittedPoints,
     originalPoints
   };

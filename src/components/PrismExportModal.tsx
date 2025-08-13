@@ -408,7 +408,7 @@ All analysis settings and graph configurations are preserved.`);
                   Exporting...
                 </div>
               ) : (
-                selectedFormat === 'csv' ? 'Export to CSV' : 'Export to Prism'
+                'Export to Prism'
               )}
             </button>
           </div>
