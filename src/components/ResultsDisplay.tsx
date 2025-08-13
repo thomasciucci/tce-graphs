@@ -92,6 +92,19 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
   const groupNames = Array.from(new Set((data[0]?.replicateGroups || []).filter(Boolean)));
   const groupCurves = fittedCurves.filter(curve => groupNames.includes(curve.sampleName) && curve.meanPoints && curve.meanPoints.length >= 3);
   const individualCurves = fittedCurves.filter(curve => data[0]?.sampleNames.includes(curve.sampleName));
+  
+  // Debug: Log the curves to identify the extra one
+  console.log('ResultsDisplay Debug:', {
+    fittedCurvesCount: fittedCurves.length,
+    fittedCurveNames: fittedCurves.map(c => c.sampleName),
+    groupNames,
+    groupCurvesCount: groupCurves.length,
+    groupCurveNames: groupCurves.map(c => c.sampleName),
+    individualCurvesCount: individualCurves.length,
+    individualCurveNames: individualCurves.map(c => c.sampleName),
+    sampleNames: data[0]?.sampleNames,
+    replicateGroups: data[0]?.replicateGroups
+  });
 
   // Create mapping for display names
   const getDisplayName = useMemo(() => (sampleName: string): string => {
@@ -341,7 +354,32 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
           <div>
             <h3 className="text-lg font-medium text-gray-900 mb-3">Summary Statistics</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {fittedCurves.map((curve, index) => (
+              {/* Only show curves that are actually being displayed */}
+              {(() => {
+                const curvesToShow = [];
+                // If we have groups and they're being shown, add them
+                if (showGroups && groupCurves.length > 0) {
+                  curvesToShow.push(...groupCurves);
+                }
+                // If we have individuals and they're being shown, add them
+                if (showIndividuals && individualCurves.length > 0) {
+                  curvesToShow.push(...individualCurves);
+                }
+                // If nothing is shown but we have individual curves, show them
+                if (curvesToShow.length === 0 && individualCurves.length > 0) {
+                  curvesToShow.push(...individualCurves);
+                }
+                
+                // Filter out any curves with undefined or empty names
+                const validCurves = curvesToShow.filter(curve => curve.sampleName && curve.sampleName.trim() !== '');
+                
+                // Remove duplicates based on sampleName
+                const uniqueCurves = validCurves.filter((curve, index, self) =>
+                  index === self.findIndex(c => c.sampleName === curve.sampleName)
+                );
+                
+                return uniqueCurves;
+              })().map((curve, index) => (
                 <div key={`${curve.sampleName || 'curve'}_${index}_summary`} className="bg-gradient-to-br from-gray-50 to-gray-100 p-4 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex items-center mb-3">
                     <div 
