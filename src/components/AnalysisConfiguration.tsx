@@ -29,9 +29,9 @@ const DEFAULT_CONFIG: AnalysisConfiguration = {
     qualityThresholds: { minimumRSquared: 0.80, minimumDataPoints: 6 }
   },
   metrics: {
-    calculateIC10: true,
-    calculateIC50: true,
-    calculateIC90: true,
+    calculateIC10: false,
+    calculateIC50: false,
+    calculateIC90: false,
     calculateEC10: true,
     calculateEC50: true,
     calculateEC90: true,
@@ -143,35 +143,6 @@ const AnalysisConfigurationComponent: React.FC<AnalysisConfigurationProps> = ({
                 className="rounded text-[#8A0051] focus:ring-[#8A0051]"
               />
               <span className="text-sm text-gray-700">EC90</span>
-            </label>
-            
-            {/* IC Metrics */}
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={configuration.metrics.calculateIC10}
-                onChange={(e) => updateMetrics({ calculateIC10: e.target.checked })}
-                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
-              />
-              <span className="text-sm text-gray-700">IC10</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={configuration.metrics.calculateIC50}
-                onChange={(e) => updateMetrics({ calculateIC50: e.target.checked })}
-                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
-              />
-              <span className="text-sm text-gray-700">IC50</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={configuration.metrics.calculateIC90}
-                onChange={(e) => updateMetrics({ calculateIC90: e.target.checked })}
-                className="rounded text-[#8A0051] focus:ring-[#8A0051]"
-              />
-              <span className="text-sm text-gray-700">IC90</span>
             </label>
             
             {/* Common metrics */}

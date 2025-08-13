@@ -783,24 +783,28 @@ const ResultsDisplay = forwardRef<HTMLDivElement, ResultsDisplayProps>(({
                         />
 
                         {/* Show all concentrations with reduced spacing */}
-                        {barChartData.allConcs.map((conc: number) => {
+                        {barChartData.allConcs.map((conc: number, concIdx) => {
                           const curvesToShow = (showGroups && groupCurves.length > 0) ? groupCurves : individualCurves;
-                          return curvesToShow.map((curve, sampleIdx) => {
-                            if (curveVisibility?.[sampleIdx] !== false) {
-                              return (
-                                <Bar
-                                  key={`${curve.sampleName}_${conc}`}
-                                  dataKey={`${curve.sampleName}_${conc}`}
-                                  fill={curveColors[sampleIdx % curveColors.length] || '#000000'}
-                                  name={getDisplayName(curve.sampleName)}
-                                  radius={[4, 4, 0, 0]}
-                                  maxBarSize={200}
-                                />
-                              );
-                            }
-                            return null;
-                          });
-                        }).flat().filter(Boolean)}
+                          return (
+                            <React.Fragment key={`conc-${conc}-${concIdx}`}>
+                              {curvesToShow.map((curve, sampleIdx) => {
+                                if (curveVisibility?.[sampleIdx] !== false) {
+                                  return (
+                                    <Bar
+                                      key={`bar-${curve.sampleName}-${conc}-${sampleIdx}`}
+                                      dataKey={`${curve.sampleName}_${conc}`}
+                                      fill={curveColors[sampleIdx % curveColors.length] || '#000000'}
+                                      name={getDisplayName(curve.sampleName)}
+                                      radius={[4, 4, 0, 0]}
+                                      maxBarSize={200}
+                                    />
+                                  );
+                                }
+                                return null;
+                              })}
+                            </React.Fragment>
+                          );
+                        })}
                       </BarChart>
                     </ResponsiveContainer>
                     
