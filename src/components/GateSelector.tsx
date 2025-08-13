@@ -10,7 +10,7 @@ import {
   GateAnalysisResult,
   ProcessedGate
 } from '../types';
-import { SuggestedGate } from '../utils/gateDetection';
+import { SuggestedGate, suggestGates } from '../utils/gateDetection';
 import { Trash2, Edit3, Play, ChevronRight } from 'lucide-react';
 
 interface GateSelectorProps {
@@ -101,11 +101,48 @@ export function GateSelector({
     setGateNameInput(gate.name);
   }, []);
 
+  // Enhanced auto-detection that combines existing gate detection with Quick import logic
+  const getEnhancedAutoSuggestions = useCallback((): SuggestedGate[] => {
+    try {
+      // 1. Use existing sophisticated gate detection logic (Enhanced Selection workflow)
+      const gateSuggestions = suggestGates(spreadsheetData);
+      console.log('🎯 Gate detection found:', gateSuggestions.length, 'suggestions');
+      
+      // 2. Integrate Quick import table detection logic
+      const tableDetections = detectDataTablesAsGates(spreadsheetData);
+      console.log('📊 Table detection found:', tableDetections.length, 'additional suggestions');
+      
+      // 3. Combine and deduplicate based on overlapping regions
+      const combinedSuggestions = [...gateSuggestions];
+      
+      tableDetections.forEach(tableGate => {
+        // Check if this table detection overlaps significantly with existing gate suggestions
+        const overlaps = gateSuggestions.some(existingGate => {
+          const overlap = calculateOverlap(existingGate.boundingBox, tableGate.boundingBox);
+          return overlap > 0.5; // 50% overlap threshold
+        });
+        
+        if (!overlaps) {
+          combinedSuggestions.push(tableGate);
+        }
+      });
+      
+      console.log('🔄 Combined detection found:', combinedSuggestions.length, 'total suggestions');
+      return combinedSuggestions;
+      
+    } catch (error) {
+      console.error('Enhanced auto-detection failed:', error);
+      return autoSuggestedGates; // Fallback to original suggestions
+    }
+  }, [spreadsheetData, autoSuggestedGates]);
+
   const handleAutoDetectionToggle = useCallback(() => {
     if (!autoDetectionEnabled) {
-      // Enable auto-detection and add suggested gates with consistent colors
+      // Enable enhanced auto-detection
       const existingGatesCount = gates.filter(g => !autoDetectedGateIds.has(g.id)).length;
-      const newAutoGates = autoSuggestedGates.map((gate, index) => ({
+      const enhancedSuggestions = getEnhancedAutoSuggestions();
+      
+      const newAutoGates = enhancedSuggestions.map((gate, index) => ({
         ...gate,
         id: `auto-${Date.now()}-${index}`,
         color: GATE_COLORS[(existingGatesCount + index) % GATE_COLORS.length]
@@ -129,7 +166,7 @@ export function GateSelector({
         setSelectedGateId(undefined);
       }
     }
-  }, [autoDetectionEnabled, autoSuggestedGates, gates, autoDetectedGateIds, selectedGateId]);
+  }, [autoDetectionEnabled, getEnhancedAutoSuggestions, gates, autoDetectedGateIds, selectedGateId]);
 
   const handleConfirmGates = useCallback(async () => {
     if (gates.length === 0) return;
@@ -180,7 +217,10 @@ export function GateSelector({
                   : 'bg-white border-gray-300 text-gray-700 hover:border-[#8A0051] hover:text-[#8A0051]'
               }`}
             >
-              {autoDetectionEnabled ? '✓ Auto' : 'Auto'}
+              <span className="flex items-center gap-1">
+                {autoDetectionEnabled ? '✓ Auto' : 'Auto'}
+                <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium">beta</span>
+              </span>
             </button>
           )}
         </div>
@@ -375,4 +415,197 @@ export function GateSelector({
       </div>
     </div>
   );
+}
+
+// Helper functions for enhanced auto-detection integration
+
+/**
+ * Calculate overlap percentage between two bounding boxes
+ */
+function calculateOverlap(box1: BoundingBox, box2: BoundingBox): number {
+  const x1 = Math.max(box1.startColumn, box2.startColumn);
+  const y1 = Math.max(box1.startRow, box2.startRow);
+  const x2 = Math.min(box1.endColumn, box2.endColumn);
+  const y2 = Math.min(box1.endRow, box2.endRow);
+  
+  if (x1 >= x2 || y1 >= y2) {
+    return 0; // No overlap
+  }
+  
+  const overlapArea = (x2 - x1) * (y2 - y1);
+  const box1Area = (box1.endColumn - box1.startColumn) * (box1.endRow - box1.startRow);
+  const box2Area = (box2.endColumn - box2.startColumn) * (box2.endRow - box2.startRow);
+  const unionArea = box1Area + box2Area - overlapArea;
+  
+  return overlapArea / unionArea; // Jaccard similarity
+}
+
+/**
+ * Detect data tables using Quick import workflow logic and convert to gate suggestions
+ */
+function detectDataTablesAsGates(spreadsheetData: SpreadsheetData): SuggestedGate[] {
+  const suggestions: SuggestedGate[] = [];
+  
+  try {
+    // Adapt the Quick import table detection logic for gate detection
+    const detectedTables = findDataTablesFromSpreadsheet(spreadsheetData.originalData);
+    
+    detectedTables.forEach((table, index) => {
+      const boundingBox: BoundingBox = {
+        startRow: Math.max(0, table.startRow),
+        endRow: Math.min(spreadsheetData.originalData.length - 1, table.endRow),
+        startColumn: Math.max(0, table.startCol),
+        endColumn: Math.min((spreadsheetData.originalData[0] as any[])?.length - 1 || 0, table.endCol)
+      };
+      
+      // Create gate suggestion with improved naming and confidence
+      const suggestion: SuggestedGate = {
+        id: `table-${index}-${Date.now()}`,
+        name: table.title || `Dataset ${index + 1}`,
+        boundingBox,
+        isSelected: false,
+        dataType: 'dose-response',
+        color: GATE_COLORS[index % GATE_COLORS.length],
+        confidence: Math.min(0.8, 0.4 + (table.confidence || 0.4)), // Boost confidence but cap at 0.8
+        reason: `Table detected: ${table.assayType} (${table.orientation} orientation)`,
+        dataPreview: table.preview || []
+      };
+      
+      suggestions.push(suggestion);
+    });
+    
+    console.log('📊 Quick import logic detected:', suggestions.length, 'table-based gate suggestions');
+    return suggestions;
+    
+  } catch (error) {
+    console.error('Table detection as gates failed:', error);
+    return [];
+  }
+}
+
+/**
+ * Simplified table detection adapted from Quick import workflow
+ */
+function findDataTablesFromSpreadsheet(jsonData: any[][]): DetectedTable[] {
+  const tables: DetectedTable[] = [];
+  
+  // Enhanced keyword matching for assay types - from Quick import logic
+  const keywords = [
+    { terms: ['cytotoxicity', 'killing', 'death', 'viability', 'survival'], assayType: 'cytotoxicity' },
+    { terms: ['cd107a', 'degranulation', 'cd107'], assayType: 'degranulation' },
+    { terms: ['cd4', 'cd8', 'activation', 'ifng', 'interferon'], assayType: 'activation' },
+    { terms: ['tcr', 't cell', 'proliferation', 'expansion'], assayType: 'proliferation' },
+    { terms: ['nk', 'natural killer', 'lysis'], assayType: 'cytotoxicity' },
+    { terms: ['concentration', 'dose', 'response', 'data'], assayType: 'dose-response' }
+  ];
+  
+  // Scan for table patterns - simplified version of Quick import logic
+  for (let row = 0; row < jsonData.length - 3; row++) {
+    for (let col = 0; col < Math.min(10, (jsonData[row] as any[])?.length || 0); col++) {
+      const cellValue = String(jsonData[row]?.[col] || '').toLowerCase();
+      
+      // Look for concentration/dose indicators
+      if (cellValue.includes('concentration') || cellValue.includes('dose') || 
+          cellValue.includes('nm') || cellValue.includes('μm') || 
+          cellValue.includes('mg/ml') || cellValue.includes('ng/ml')) {
+        
+        // Try to detect table structure
+        const table = analyzeTableAtPosition(jsonData, row, col);
+        if (table && table.responseColumns.length >= 2) {
+          tables.push(table);
+        }
+      }
+    }
+  }
+  
+  return tables;
+}
+
+/**
+ * Analyze table structure at specific position - simplified from Quick import
+ */
+function analyzeTableAtPosition(jsonData: any[][], headerRow: number, startCol: number): DetectedTable | null {
+  try {
+    // Look for numeric data pattern
+    const dataRowStart = headerRow + 1;
+    let dataRowEnd = headerRow + 1;
+    let validColumns = 0;
+    
+    // Count valid data rows and columns
+    for (let r = dataRowStart; r < Math.min(headerRow + 20, jsonData.length); r++) {
+      const row = jsonData[r] as any[];
+      if (!row) break;
+      
+      let numericCells = 0;
+      for (let c = startCol; c < Math.min(startCol + 10, row.length); c++) {
+        const cell = row[c];
+        if (cell !== null && cell !== undefined && !isNaN(parseFloat(String(cell)))) {
+          numericCells++;
+        }
+      }
+      
+      if (numericCells >= 2) {
+        dataRowEnd = r;
+        validColumns = Math.max(validColumns, numericCells);
+      } else if (r - dataRowStart > 2) {
+        break; // End of table
+      }
+    }
+    
+    // Must have at least 4 data rows and 3 columns (concentration + 2 responses)
+    if (dataRowEnd - dataRowStart < 3 || validColumns < 3) {
+      return null;
+    }
+    
+    // Generate sample names
+    const sampleNames = Array.from({ length: validColumns - 1 }, (_, i) => `Sample ${i + 1}`);
+    
+    // Create preview data
+    const preview: any[][] = [];
+    for (let r = headerRow; r <= Math.min(headerRow + 5, dataRowEnd); r++) {
+      const row = jsonData[r] as any[];
+      if (row) {
+        preview.push(row.slice(startCol, startCol + validColumns));
+      }
+    }
+    
+    return {
+      id: `table_${headerRow}_${startCol}`,
+      title: `Data Table (${headerRow}, ${startCol})`,
+      assayType: 'dose-response',
+      startRow: headerRow,
+      endRow: dataRowEnd,
+      startCol: startCol,
+      endCol: startCol + validColumns - 1,
+      headerRow: headerRow,
+      concentrationCol: 0,
+      responseColumns: Array.from({ length: validColumns - 1 }, (_, i) => i + 1),
+      sampleNames,
+      preview,
+      orientation: 'column',
+      confidence: 0.6
+    };
+    
+  } catch (error) {
+    console.error('Error analyzing table at position:', error);
+    return null;
+  }
+}
+
+// Interface for detected table (simplified from Quick import)
+interface DetectedTable {
+  id: string;
+  title: string;
+  assayType: string;
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+  headerRow: number;
+  concentrationCol: number;
+  responseColumns: number[];
+  sampleNames: string[];
+  preview: any[][];
+  orientation: 'row' | 'column';
+  confidence?: number;
 }
