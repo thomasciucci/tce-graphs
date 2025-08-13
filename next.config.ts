@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
     // your project has TypeScript errors.
     ignoreBuildErrors: true,
   },
+  // Force rebuild
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Fallback for node modules in browser
